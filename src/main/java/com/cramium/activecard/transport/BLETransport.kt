@@ -1,4 +1,4 @@
-package com.cramium.activecard.activecard
+package com.cramium.activecard.transport
 
 import android.util.Log
 import com.cramium.activecard.TransportMessageWrapper

@@ -1,4 +1,4 @@
-package com.cramium.activecard.simulator
+package com.cramium.activecard.ble
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
@@ -18,36 +18,49 @@ import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
 import android.util.Log
-import com.cramium.activecard.activecard.BLEPacketHelper
-import com.cramium.activecard.activecard.BLETransport
+import com.cramium.activecard.TransportMessageWrapper
+import com.cramium.activecard.transport.BLEPacketHelper
+import com.cramium.activecard.transport.BLETransport
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharedFlow
 import java.util.Arrays
 import java.util.UUID
 
+interface BleServer {
+    val receiveMessage: SharedFlow<TransportMessageWrapper>
+    val connectedDevices: Set<BluetoothDevice>
+    fun start(name: String = "AC_Simulator")
+    fun stop()
+    suspend fun notifyClients(data: ByteArray)
+    fun disconnectDevice(device: BluetoothDevice)
+}
+
 @SuppressLint("MissingPermission")
-class BleServer(
+class BleServerImpl(
     private val context: Context
-) {
+): BleServer {
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val adapter = bluetoothManager.adapter
     private val advertiser: BluetoothLeAdvertiser? = adapter.bluetoothLeAdvertiser
     private var gattServer: BluetoothGattServer? = null
     private val clients = mutableSetOf<BluetoothDevice>()
+    override val connectedDevices: Set<BluetoothDevice>
+        get() = clients
     private val blePacketHelper = BLEPacketHelper()
-    val receiveMessage = blePacketHelper.receiveMessage
+    override val receiveMessage = blePacketHelper.receiveMessage
     companion object {
         private const val TAG = "BleGattServer"
         private val CCC_DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 
     /** Start GATT server and BLE advertising */
-    fun start(name: String = "AC_Simulator") {
+    override fun start(name: String) {
         setupGattServer()
         startAdvertising(name)
     }
 
     /** Stop advertising and shut down GATT server */
-    fun stop() {
+    override fun stop() {
         stopAdvertising()
         gattServer?.close()
         gattServer = null
@@ -120,7 +133,7 @@ class BleServer(
     }
 
     /** Send a notification to all connected clients */
-    suspend fun notifyClients(data: ByteArray) {
+    override suspend fun notifyClients(data: ByteArray) {
         delay(20)
         val service = gattServer?.getService(BLETransport.UART_UUID) ?: return
         val char = service.getCharacteristic(BLETransport.RX_UUID) ?: return
@@ -139,7 +152,7 @@ class BleServer(
     }
 
     /** Tear down the GATT connection to that device */
-    private fun disconnectDevice(device: BluetoothDevice) {
+    override fun disconnectDevice(device: BluetoothDevice) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             gattServer?.cancelConnection(device)
         } else {
