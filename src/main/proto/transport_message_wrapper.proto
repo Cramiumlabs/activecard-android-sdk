@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package com.cramium.sdk;
+option java_multiple_files = true;
+option java_package = "com.cramium.sdk.ac";
+
+// A generic wrapper for transport messages, possibly encrypted.
+message TransportMessageWrapper {
+  // The type of this message.
+  uint32 message_type = 1;
+
+  // The byte-length of the serialized TransportMessageWrapper payload.
+  uint32 message_size = 2;
+
+  // Session identifier assigned by the data service upon connection establishment.
+  bytes session_id = 3;
+
+  // Epoch time (ms) when the session was created, filled in by the data service library.
+  uint64 session_start_time = 4;
+
+  // The serialized payload of the inner message.
+  bytes contents = 5;
+
+  // Length of the IV used in AES encryption/decryption.
+  uint32 iv_len = 6;
+
+  // Length of the authentication tag used in AES encryption/decryption.
+  uint32 tag_len = 7;
+
+  // Initialization Vector for AES encryption/decryption.
+  bytes iv = 8;
+
+  // Authentication Tag for AES encryption/decryption.
+  bytes tag = 9;
+
+  // True if `contents` is encrypted with AES using the above IV & tag.
+  bool is_encrypted = 10;
+}

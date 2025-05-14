@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package com.cramium.sdk;
+option java_multiple_files = true;
+option java_package = "com.cramium.sdk.ac";
+
+message EcdhPublicKey {
+  bytes public_key = 1;
+  string source = 2;
+}
