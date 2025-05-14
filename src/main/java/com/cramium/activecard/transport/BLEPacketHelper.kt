@@ -1,103 +1,21 @@
-package com.cramium.activecard.activecard
+package com.cramium.activecard.transport
 
 import android.util.Log
 import com.cramium.activecard.TransportMessageWrapper
-import com.cramium.activecard.ble.BleClient
-import com.cramium.activecard.ble.CharOperationFailed
 import com.cramium.activecard.exception.MpcException
 import com.google.protobuf.ByteString
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.shareIn
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Arrays
-import java.util.UUID
-
-class BLETransport(
-    private val bleClient: BleClient,
-) : Transport {
-    companion object {
-        val CLIENT_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-        val RX_UUID: UUID = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
-        val TX_UUID: UUID = UUID.fromString("0000ae01-0000-1000-8000-00805f9b34fb")
-        val UART_UUID: UUID = UUID.fromString("0000ae30-0000-1000-8000-00805f9b34fb")
-    }
-
-    private var cachedBuf: ByteArray? = null
-    private var txJob: Job? = null
-    override val connectionType: ConnectionType = ConnectionType.BLE
-    private val packetHelper = BLEPacketHelper()
-    val receiveMessage get() = packetHelper.receiveMessage
-    override fun writeData(data: TransportMessageWrapper): Boolean {
-        return true
-    }
-
-    override fun readData(data: ByteArray): Boolean {
-        packetHelper.emit(data)
-        cachedBuf = if (cachedBuf == null) byteArrayOf() else cachedBuf
-        cachedBuf = cachedBuf!! + data
-        when (val message = BLEPacketHelper.parseFullMessagePayload(cachedBuf!!)) {
-            is ParseResult.Full -> {
-                cachedBuf = null
-                return true
-            }
-
-            is ParseResult.Partial -> {
-                return false
-            }
-
-            is ParseResult.Error -> throw message.error
-        }
-    }
-
-
-    suspend fun writeData(deviceId: String, message: TransportMessageWrapper) {
-        val packets = BLEPacketHelper.prepareMessagePackets(message)
-        withContext(Dispatchers.IO) {
-            for (packet in packets) {
-                withTimeout(500) {
-                    val result =
-                        bleClient.writeCharacteristicWithoutResponse(deviceId, TX_UUID, 0, packet)
-                            .catch { e ->
-                                // Flow emission error (e.g. BLE stack failure)
-                                throw MpcException("cra-mks-008-00", "BLE write-flow error", e)
-                            }
-                            .first()
-                    if (result is CharOperationFailed) {
-                        throw MpcException("cra-mks-008-00", "BLE write failed: ${result.errorMessage}")
-                    }
-                }
-            }
-        }
-    }
-
-    fun unsubscribeTx() {
-        txJob?.cancel()
-    }
-
-    fun subscribeToTx(deviceId: String): Flow<ByteArray> {
-        return bleClient.setupNotification(deviceId, RX_UUID, 0)
-            .map { data ->
-                val trimData = data.copyOfRange(5, data.size)
-                packetHelper.emit(trimData)
-                trimData
-            }
-            .catch { e -> Log.e("BLETransport", "Got error: $e") }
-    }
-}
 
 class BLEPacketHelper {
     companion object {
@@ -112,11 +30,11 @@ class BLEPacketHelper {
         private const val PACKET_SIZE = 120
         private const val PACKET_HEADER_BUFFER_SIZE =
             3 + // 3 bytes header
-                    1 + // 1 byte encrypted flag
-                    2 + // 2 byte message type (short type)
-                    4 + // 4 byte message size (long type)
-                    8 + // 8 byte session id
-                    4   // 4 byte session time in epoch
+            1 + // 1 byte encrypted flag
+            2 + // 2 byte message type (short type)
+            4 + // 4 byte message size (long type)
+            8 + // 8 byte session id
+            4   // 4 byte session time in epoch
 
         /**
          * Builds the full message payload from the TransportMessageWrapper.
@@ -250,7 +168,7 @@ class BLEPacketHelper {
          * @return The packet with the header added.
          */
         private fun addPacketHeader(packet: ByteArray, segmentCounter: Int): ByteArray {
-            val newPacket = ByteArray(packet.size + BLEPacketHelper.PACKET_HEADER.size + 2)
+            val newPacket = ByteArray(packet.size + PACKET_HEADER.size + 2)
             val header = byteArrayOf(
                 *PACKET_HEADER,
                 (segmentCounter shr 8).toByte(),
@@ -279,14 +197,16 @@ class BLEPacketHelper {
                     }
 
                     is ParseResult.Partial -> null
-                    is ParseResult.Error -> throw parse.error
+                    is ParseResult.Error -> {
+                        combineArray = byteArrayOf()
+                        throw parse.error
+                    }
                 }
             }
             .filterNotNull()
             .onEach { Log.d("BLEPacketHelper", "Received message: $it") }
             .shareIn(CoroutineScope(Dispatchers.IO), SharingStarted.Eagerly)
 }
-
 
 sealed class ParseResult {
     data class Partial(val data: ByteArray) : ParseResult() {

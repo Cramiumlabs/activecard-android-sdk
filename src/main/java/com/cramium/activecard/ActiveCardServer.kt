@@ -1,15 +1,11 @@
-package com.cramium.activecard.simulator
+package com.cramium.activecard
 
 import android.annotation.SuppressLint
 import android.content.Context
-import com.cramium.activecard.IdentityPublicKey
-import com.cramium.activecard.NonceResponse
-import com.cramium.activecard.SignatureVerificationResult
-import com.cramium.activecard.SignedNonce
-import com.cramium.activecard.TransportMessageWrapper
-import com.cramium.activecard.activecard.BLEPacketHelper
+import com.cramium.activecard.ble.BleServer
+import com.cramium.activecard.ble.BleServerImpl
 import com.cramium.activecard.exception.MpcException
-import com.cramium.activecard.activecard.ActiveCardEvent
+import com.cramium.activecard.transport.BLEPacketHelper
 import com.cramium.activecard.utils.Ed25519Signer
 import com.cramium.activecard.utils.generateNonce
 import com.google.protobuf.ByteString
@@ -18,7 +14,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.map
 
-interface ACSimulator {
+interface ActiveCardServer {
     val receiveMessage: SharedFlow<TransportMessageWrapper>
     fun startAdvertising(deviceName: String)
     fun stopAdvertising()
@@ -30,13 +26,13 @@ interface ACSimulator {
 }
 
 @SuppressLint("MissingPermission")
-class ACSimulatorImpl(
-    private val context: Context
-) : ACSimulator {
+class ActiveCardServerImpl(
+    context: Context
+) : ActiveCardServer {
     override val receiveMessage: SharedFlow<TransportMessageWrapper>
         get() = bleServer.receiveMessage
 
-    private val bleServer = BleServer(context)
+    private val bleServer: BleServer = BleServerImpl(context)
 
     override fun startAdvertising(deviceName: String) {
         bleServer.start(deviceName)

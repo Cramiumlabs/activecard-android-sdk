@@ -1,4 +1,4 @@
-package com.cramium.activecard.activecard
+package com.cramium.activecard
 
 enum class ActiveCardEvent(val id: Int) {
     NONCE_REQUEST(1),

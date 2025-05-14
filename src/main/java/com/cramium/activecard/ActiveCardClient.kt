@@ -1,12 +1,7 @@
-package com.cramium.activecard.activecard
+package com.cramium.activecard
 
 import android.content.Context
 import android.util.Log
-import com.cramium.activecard.IdentityPublicKey
-import com.cramium.activecard.NonceResponse
-import com.cramium.activecard.SignatureVerificationResult
-import com.cramium.activecard.SignedNonce
-import com.cramium.activecard.TransportMessageWrapper
 import com.cramium.activecard.ble.BleClient
 import com.cramium.activecard.ble.BleClientImpl
 import com.cramium.activecard.ble.ConnectionUpdate
@@ -17,6 +12,7 @@ import com.cramium.activecard.ble.ScanInfo
 import com.cramium.activecard.ble.model.ConnectionState
 import com.cramium.activecard.ble.model.ScanMode
 import com.cramium.activecard.exception.MpcException
+import com.cramium.activecard.transport.BLETransport
 import com.cramium.activecard.utils.Constants.UNKNOWN_NONCE
 import com.cramium.activecard.utils.Ed25519Signer
 import com.google.protobuf.ByteString
