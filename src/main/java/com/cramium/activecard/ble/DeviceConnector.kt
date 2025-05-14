@@ -2,9 +2,9 @@ package com.cramium.activecard.ble
 
 import android.util.Log
 import androidx.annotation.VisibleForTesting
-import com.cramium.sdk.ble.model.ConnectionQueue
-import com.cramium.sdk.ble.model.ConnectionState
-import com.cramium.sdk.ble.model.toConnectionState
+import com.cramium.activecard.ble.model.ConnectionQueue
+import com.cramium.activecard.ble.model.ConnectionState
+import com.cramium.activecard.ble.model.toConnectionState
 import com.polidea.rxandroidble3.RxBleConnection
 import com.polidea.rxandroidble3.RxBleCustomOperation
 import com.polidea.rxandroidble3.RxBleDevice

@@ -1,4 +1,4 @@
-package com.cramium.sdk.simulator
+package com.cramium.activecard.simulator
 
 import com.google.gson.annotations.SerializedName
 

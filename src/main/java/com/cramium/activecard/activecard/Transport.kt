@@ -1,6 +1,6 @@
 package com.cramium.activecard.activecard
 
-import com.cramium.activecard.ac.TransportMessageWrapper
+import com.cramium.activecard.TransportMessageWrapper
 
 interface Transport {
     val connectionType: ConnectionType

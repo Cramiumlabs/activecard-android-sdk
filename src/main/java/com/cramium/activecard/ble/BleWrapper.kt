@@ -1,6 +1,6 @@
 package com.cramium.activecard.ble
 
-import com.cramium.sdk.ble.model.ConnectionState
+import com.cramium.activecard.ble.model.ConnectionState
 import com.polidea.rxandroidble3.RxBleConnection
 import java.util.UUID
 

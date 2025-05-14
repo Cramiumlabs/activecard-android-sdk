@@ -1,7 +1,7 @@
 package com.cramium.activecard.activecard
 
 import android.util.Log
-import com.cramium.activecard.ac.TransportMessageWrapper
+import com.cramium.activecard.TransportMessageWrapper
 import com.cramium.activecard.ble.BleClient
 import com.cramium.activecard.ble.CharOperationFailed
 import com.cramium.activecard.exception.MpcException

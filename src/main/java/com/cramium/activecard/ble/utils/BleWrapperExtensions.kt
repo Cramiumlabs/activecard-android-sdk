@@ -9,7 +9,6 @@ import com.polidea.rxandroidble3.RxBleClient.State.LOCATION_PERMISSION_NOT_GRANT
 import com.polidea.rxandroidble3.RxBleClient.State.LOCATION_SERVICES_NOT_ENABLED
 import com.polidea.rxandroidble3.RxBleClient.State.READY
 
-
 fun RxBleClient.State.toBleState(): BleStatus =
     when (this) {
         BLUETOOTH_NOT_AVAILABLE -> BleStatus.UNSUPPORTED

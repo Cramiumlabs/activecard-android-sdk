@@ -2,11 +2,11 @@ package com.cramium.activecard.activecard
 
 import android.content.Context
 import android.util.Log
-import com.cramium.activecard.ac.IdentityPublicKey
-import com.cramium.activecard.ac.NonceResponse
-import com.cramium.activecard.ac.SignatureVerificationResult
-import com.cramium.activecard.ac.SignedNonce
-import com.cramium.activecard.ac.TransportMessageWrapper
+import com.cramium.activecard.IdentityPublicKey
+import com.cramium.activecard.NonceResponse
+import com.cramium.activecard.SignatureVerificationResult
+import com.cramium.activecard.SignedNonce
+import com.cramium.activecard.TransportMessageWrapper
 import com.cramium.activecard.ble.BleClient
 import com.cramium.activecard.ble.BleClientImpl
 import com.cramium.activecard.ble.ConnectionUpdate

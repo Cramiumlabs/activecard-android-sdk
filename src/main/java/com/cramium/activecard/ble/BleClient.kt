@@ -39,7 +39,6 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration
 
-
 interface BleClient {
     val connectionUpdateSubject: SharedFlow<ConnectionUpdate>
     fun initializeClient()

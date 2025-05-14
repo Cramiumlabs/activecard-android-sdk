@@ -70,6 +70,7 @@ protobuf {
     }
 }
 
+
 dependencies {
 
     implementation("androidx.core:core-ktx:1.13.1")
@@ -82,5 +83,6 @@ dependencies {
     implementation("com.google.zxing:core:3.5.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-rx3:1.10.1")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.80")
-
+    implementation("com.google.protobuf:protoc:3.25.3")
+    implementation("com.google.protobuf:protobuf-javalite:3.25.3")
 }

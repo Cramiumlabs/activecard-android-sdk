@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package com.cramium.sdk;
 option java_multiple_files = true;
-option java_package = "com.cramium.sdk.ac";
+option java_package = "com.cramium.activecard";
 
 message EcdhExchangeAck {
   bool success = 1;
