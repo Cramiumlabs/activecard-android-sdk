@@ -37,7 +37,6 @@ import kotlinx.coroutines.rx3.asFlow
 import kotlinx.coroutines.rx3.await
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import kotlin.time.Duration
 
 interface BleClient {
     val connectionUpdateSubject: SharedFlow<ConnectionUpdate>

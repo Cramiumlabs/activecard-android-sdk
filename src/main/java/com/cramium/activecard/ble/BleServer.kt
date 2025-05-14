@@ -140,11 +140,9 @@ class BleServerImpl(
         Log.d("BleGattServer", "notifyClients: $data")
         clients.forEach { device ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // Use the newer, memory-safe overload (API 33+)
                 gattServer?.notifyCharacteristicChanged(device, char, false, data)
             } else {
                 char.value = data
-                // Fallback for older API levels
                 @Suppress("DEPRECATION")
                 gattServer?.notifyCharacteristicChanged(device, char, false)
             }
