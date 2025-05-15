@@ -2,7 +2,8 @@ package com.cramium.activecard.transport
 
 import android.util.Log
 import com.cramium.activecard.TransportMessageWrapper
-import com.cramium.activecard.exception.MpcException
+import com.cramium.activecard.exception.ActiveCardException
+import com.cramium.activecard.utils.AesGcmHelper
 import com.google.protobuf.ByteString
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +54,7 @@ class BLEPacketHelper {
             val sessionStart = message.sessionStartTime.toInt()
 
             val buffer: ByteBuffer = if (message.isEncrypted) {
-                ByteBuffer.allocate(message.messageSize + PACKET_HEADER_BUFFER_SIZE + AES_GCM_IV_LENGTH + AES_GCM_TAG_LENGTH + AES_GCM_ENCRYPT_ENABLE_LENGTH)
+                ByteBuffer.allocate(message.messageSize + PACKET_HEADER_BUFFER_SIZE + AES_GCM_IV_LENGTH + AES_GCM_TAG_LENGTH)
             } else {
                 ByteBuffer.allocate(message.messageSize + PACKET_HEADER_BUFFER_SIZE)
             }
@@ -84,15 +85,13 @@ class BLEPacketHelper {
 
             val header = ByteArray(HEADERS.size).also { buffer.get(it) }
             if (!header.contentEquals(HEADERS)) return ParseResult.Error(
-                MpcException("cra-mks-008-00", "Invalid header")
+                ActiveCardException("cra-aks-008-00", "Invalid header")
             )
 
             val encrypted = buffer.get() == ENCRYPTED_FLAG
 
-            val ivBytes =
-                if (encrypted) ByteArray(AES_GCM_IV_LENGTH).also { buffer.get(it) } else byteArrayOf()
-            val tagBytes =
-                if (encrypted) ByteArray(AES_GCM_TAG_LENGTH).also { buffer.get(it) } else byteArrayOf()
+            val iv = if (encrypted) ByteArray(AES_GCM_IV_LENGTH).also { buffer.get(it) } else byteArrayOf()
+            val tag = if (encrypted) ByteArray(AES_GCM_TAG_LENGTH).also { buffer.get(it) } else byteArrayOf()
 
             val messageType = buffer.short.toInt() and 0xFFFF
             val messageSize = buffer.int
@@ -102,32 +101,54 @@ class BLEPacketHelper {
 
             if (buffer.remaining() < messageSize) return ParseResult.Partial(payload)
 
-            val contentBytes = ByteArray(messageSize).also { buffer.get(it) }
-
+            val rawContentBytes = ByteArray(messageSize).also { buffer.get(it) }
+            val contentBytes = if (encrypted) AesGcmHelper.decrypt(iv, tag, rawContentBytes) else rawContentBytes
             val message = TransportMessageWrapper.newBuilder()
                 .setMessageType(messageType)
                 .setMessageSize(messageSize)
                 .setSessionId(ByteString.copyFrom(sessionIdBytes))
                 .setSessionStartTime(sessionStartTime)
                 .setContents(ByteString.copyFrom(contentBytes))
-                .setIv(ByteString.copyFrom(ivBytes))
-                .setTag(ByteString.copyFrom(tagBytes))
+                .setIv(ByteString.copyFrom(iv))
+                .setTag(ByteString.copyFrom(tag))
                 .setIsEncrypted(encrypted)
                 .build()
             return ParseResult.Full(message)
         }
 
         /**
-         * Prepares the data to be sent over the BLE transport.
+         * Prepares BLE transport packets from raw message bytes.
          *
-         * This method takes a TransportMessageWrapper, constructs the complete message payload,
-         * and splits it into smaller packets if necessary.
+         * This method optionally encrypts the provided `rawMessage` using AES-GCM, wraps the result
+         * into a `TransportMessageWrapper` (including IV, tag, and session metadata), serializes it
+         * into a full byte payload, and splits that payload into smaller packets suitable for BLE MTU.
          *
-         * @param message The message to be prepared for sending.
-         * @return A list of byte arrays, where each byte array represents a packet to be sent.
+         * @param messageType  Protocol-specific integer identifying the message type.
+         * @param rawMessage   The unencrypted payload bytes to send.
+         * @param isEncrypted  Flag indicating whether to encrypt `rawMessage` before packaging.
+         *                     If `true`, AES-GCM encryption is applied; if `false`, `rawMessage`
+         *                     is used directly without encryption.
+         * @return             A list of packet byte arrays.
          */
-        fun prepareMessagePackets(message: TransportMessageWrapper): List<ByteArray> {
-            val fullMessage = buildFullMessagePayload(message)
+        fun prepareMessagePackets(messageType: Int, rawMessage: ByteArray, isEncrypted: Boolean = true): List<ByteArray> {
+            val encryptedResult = AesGcmHelper.encrypt(rawMessage)
+            val iv = if (isEncrypted) encryptedResult.iv else ByteArray(1) { 0 }
+            val tag = if (isEncrypted) encryptedResult.tag else ByteArray(1) { 0 }
+            val contents = if (isEncrypted) encryptedResult.cipherText else rawMessage
+            val messageWrapper = TransportMessageWrapper.newBuilder()
+                .setMessageType(messageType)
+                .setMessageSize(rawMessage.size)
+                .setIsEncrypted(isEncrypted)
+                .setIv(ByteString.copyFrom(iv))
+                .setTag(ByteString.copyFrom(tag))
+                .setIvLen(iv.size)
+                .setTagLen(tag.size)
+                .setContents(ByteString.copyFrom(contents))
+                .setSessionId(ByteString.copyFrom(ByteArray(8) { it.toByte() }))
+                .setSessionStartTime(System.currentTimeMillis())
+                .build()
+            Log.d("BLEPacketHelper", "Prepared message: $messageWrapper")
+            val fullMessage = buildFullMessagePayload(messageWrapper)
             return splitMessageIntoPackets(fullMessage)
         }
 

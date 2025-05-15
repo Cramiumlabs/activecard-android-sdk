@@ -4,26 +4,15 @@ import android.util.Log
 import com.cramium.activecard.TransportMessageWrapper
 import com.cramium.activecard.ble.BleClient
 import com.cramium.activecard.ble.CharOperationFailed
-import com.cramium.activecard.exception.MpcException
-import com.google.protobuf.ByteString
-import kotlinx.coroutines.CoroutineScope
+import com.cramium.activecard.exception.ActiveCardException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.util.Arrays
 import java.util.UUID
 
 class BLETransport(
@@ -64,8 +53,8 @@ class BLETransport(
     }
 
 
-    suspend fun writeData(deviceId: String, message: TransportMessageWrapper) {
-        val packets = BLEPacketHelper.prepareMessagePackets(message)
+    suspend fun writeData(deviceId: String, messageType: Int, content: ByteArray, isEncrypted: Boolean) {
+        val packets = BLEPacketHelper.prepareMessagePackets(messageType, content, isEncrypted)
         withContext(Dispatchers.IO) {
             for (packet in packets) {
                 withTimeout(500) {
@@ -73,11 +62,11 @@ class BLETransport(
                         bleClient.writeCharacteristicWithoutResponse(deviceId, TX_UUID, 0, packet)
                             .catch { e ->
                                 // Flow emission error (e.g. BLE stack failure)
-                                throw MpcException("cra-mks-008-00", "BLE write-flow error", e)
+                                throw ActiveCardException("cra-aks-008-00", "BLE write-flow error", e)
                             }
                             .first()
                     if (result is CharOperationFailed) {
-                        throw MpcException("cra-mks-008-00", "BLE write failed: ${result.errorMessage}")
+                        throw ActiveCardException("cra-aks-008-00", "BLE write failed: ${result.errorMessage}")
                     }
                 }
             }

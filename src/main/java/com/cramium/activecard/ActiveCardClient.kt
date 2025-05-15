@@ -11,7 +11,7 @@ import com.cramium.activecard.ble.MtuNegotiateResult
 import com.cramium.activecard.ble.ScanInfo
 import com.cramium.activecard.ble.model.ConnectionState
 import com.cramium.activecard.ble.model.ScanMode
-import com.cramium.activecard.exception.MpcException
+import com.cramium.activecard.exception.ActiveCardException
 import com.cramium.activecard.transport.BLETransport
 import com.cramium.activecard.utils.Constants.UNKNOWN_NONCE
 import com.cramium.activecard.utils.Ed25519Signer
@@ -27,44 +27,90 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 /**
- * An interface representing an active card device for BLE/USB communication. This interface
- * provides methods to initialize, connect, and interact with the underlying data transport layer.
+ * An interface representing an active card device for BLE/USB communication.
+ *
+ * This interface provides methods to initialize, connect, and interact with the underlying data transport layer.
  */
 interface ActiveCardClient {
+    /**
+     * A flow emitting connection status updates.
+     */
     val connectionUpdate: SharedFlow<ConnectionUpdate>
+
+    /**
+     * A flow emitting received messages from the device.
+     */
     val receiveMessage: SharedFlow<TransportMessageWrapper>
+
     /**
      * Attempts to connect to the active card device over the chosen transport channel (BLE or USB).
      *
-     * @return `true` if the connection is successfully initiated, `false` otherwise.
+     * @param deviceId The unique identifier of the target device.
      */
     fun connectToDevice(deviceId: String)
 
     /**
-     * Disconnects the active card device. Any ongoing communication will be halted.
+     * Disconnects from the active card device. Stops any ongoing communication.
+     *
+     * @param deviceId The unique identifier of the target device.
      */
     fun disconnect(deviceId: String)
 
+    /**
+     * Scans for available active card devices.
+     *
+     * @return A cold [Flow] emitting [ScanInfo] objects as devices are discovered.
+     */
     fun scanForDevices(): Flow<ScanInfo>
 
     /**
      * Sends a message to the active card device.
      *
+     * @param deviceId    The unique identifier of the target device.
      * @param messageType An integer representing the type of the message (defined by your protocol).
-     * @param content The payload to be sent, as a [ByteArray].
+     * @param content     The payload to be sent, as a [ByteArray].
      * @param isEncrypted A flag indicating whether the content is already encrypted.
-     * Currently not used for additional logic, but can be extended in the future for
-     * handling encryption within the method.
      */
-    suspend fun sendMessage(deviceId: String, messageType: Int, content: ByteArray, isEncrypted: Boolean  = false)
+    suspend fun sendMessage(
+        deviceId: String,
+        messageType: Int,
+        content: ByteArray,
+        isEncrypted: Boolean = true
+    )
 
-    fun authenticateFlow(deviceId: String, acPublicKey: ByteArray, mobilePubKey: ByteArray, onDone: () -> Unit): Job
+    /**
+     * Performs an authentication handshake with the active card device.
+     *
+     * @param deviceId     The unique identifier of the target device.
+     * @param acPublicKey  The ActiveCard's public key bytes.
+     * @param mobilePubKey The mobile device's public key bytes.
+     * @param onDone       Callback invoked when authentication completes.
+     * @return A [Job] representing the authentication coroutine.
+     */
+    fun authenticateFlow(
+        deviceId: String,
+        acPublicKey: ByteArray,
+        mobilePubKey: ByteArray,
+        onDone: () -> Unit
+    ): Job
 
+    /**
+     * Negotiates the MTU size for BLE characteristic transfers.
+     *
+     * @param deviceId The unique identifier of the target device.
+     * @param size     The desired MTU size in bytes.
+     * @return A [Flow] emitting [MtuNegotiateResult] values.
+     */
     fun negotiateMtuSize(deviceId: String, size: Int): Flow<MtuNegotiateResult>
 
+    /**
+     * Subscribes to the device’s TX characteristic to receive incoming data.
+     *
+     * @param deviceId The unique identifier of the target device.
+     * @return A [Flow] emitting raw [ByteArray] chunks as they arrive.
+     */
     fun subscribeToTx(deviceId: String): Flow<ByteArray>
 }
-
 /**
  * A default implementation of the [ActiveCardClient] interface, handling BLE/USB communication
  *
@@ -115,17 +161,7 @@ class ActiveCardClientImpl(
         isEncrypted: Boolean
     ) {
         Log.d("ActiveCardImpl", "Sending message: $messageType")
-        val messageWrapper = TransportMessageWrapper.newBuilder()
-            .setMessageType(messageType)
-            .setMessageSize(content.size)
-            .setIsEncrypted(isEncrypted)
-            .setIv(ByteString.copyFrom(ByteArray(1) { 0 }))
-            .setTag(ByteString.copyFrom(ByteArray(1) { 0 }))
-            .setContents(ByteString.copyFrom(content))
-            .setSessionId(ByteString.copyFrom(ByteArray(8) { it.toByte() }))
-            .setSessionStartTime(System.currentTimeMillis())
-            .build()
-        bleTransport.writeData(deviceId, messageWrapper)
+        bleTransport.writeData(deviceId, messageType, content, isEncrypted)
     }
 
     override fun scanForDevices(): Flow<ScanInfo> {
@@ -166,7 +202,7 @@ class ActiveCardClientImpl(
                                 sendMessage(deviceId, ActiveCardEvent.SEND_IDENTITY_PUBLIC_KEY.id, pubKeyMessage.toByteArray())
                                 onDone()
                             }
-                            else throw MpcException("cra-mks-008-00", "Signature verification failed")
+                            else throw ActiveCardException("cra-aks-008-00", "Signature verification failed")
                         }
                         else -> {}
                     }
