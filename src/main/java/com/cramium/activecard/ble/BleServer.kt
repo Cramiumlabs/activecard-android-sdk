@@ -137,7 +137,7 @@ class BleServerImpl(
         delay(20)
         val service = gattServer?.getService(BLETransport.UART_UUID) ?: return
         val char = service.getCharacteristic(BLETransport.RX_UUID) ?: return
-        Log.d("BleGattServer", "notifyClients: $data")
+        Log.d("BleGattServer", "notifyClients: ${data.toTypedArray()} - ${data.size}")
         clients.forEach { device ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 gattServer?.notifyCharacteristicChanged(device, char, false, data)

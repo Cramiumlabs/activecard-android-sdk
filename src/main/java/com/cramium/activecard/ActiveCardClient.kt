@@ -13,9 +13,8 @@ import com.cramium.activecard.ble.model.ConnectionState
 import com.cramium.activecard.ble.model.ScanMode
 import com.cramium.activecard.exception.ActiveCardException
 import com.cramium.activecard.transport.BLETransport
-import com.cramium.activecard.utils.Constants.UNKNOWN_NONCE
-import com.cramium.activecard.utils.Ed25519Signer
-import com.google.protobuf.ByteString
+import com.cramium.activecard.transport.ProtoBufHelper
+import com.cramium.activecard.utils.generateNonce
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -84,6 +83,7 @@ interface ActiveCardClient {
      * @param deviceId     The unique identifier of the target device.
      * @param acPublicKey  The ActiveCard's public key bytes.
      * @param mobilePubKey The mobile device's public key bytes.
+     * @param mobilePrivateKey The mobile device's private key bytes.
      * @param onDone       Callback invoked when authentication completes.
      * @return A [Job] representing the authentication coroutine.
      */
@@ -91,6 +91,7 @@ interface ActiveCardClient {
         deviceId: String,
         acPublicKey: ByteArray,
         mobilePubKey: ByteArray,
+        mobilePrivateKey: ByteArray,
         onDone: () -> Unit
     ): Job
 
@@ -119,7 +120,6 @@ interface ActiveCardClient {
 class ActiveCardClientImpl(
     private val context: Context
 ) : ActiveCardClient {
-    private var nonce = UNKNOWN_NONCE
     private val scope = CoroutineScope(Dispatchers.Default)
     private val bleClient: BleClient = BleClientImpl(context).apply {
         initializeClient()
@@ -181,34 +181,44 @@ class ActiveCardClientImpl(
         deviceId: String,
         acPublicKey: ByteArray,
         mobilePubKey: ByteArray,
+        mobilePrivateKey: ByteArray,
         onDone: () -> Unit
     ): Job {
-        nonce = UNKNOWN_NONCE
+        val nonceBytes = generateNonce()
         return scope.launch {
             delay(2000)
             receiveMessage
                 .onEach { result ->
                     when (ActiveCardEvent.fromValue(result.messageType)) {
-                        ActiveCardEvent.NONCE_RESPONSE -> nonce = NonceResponse.parseFrom(result.contents).nonce.toByteArray()
                         ActiveCardEvent.SIGNED_NONCE -> {
                             val signedNonce = SignedNonce.parseFrom(result.contents.toByteArray())
-                            val message = verifySignedNonce(acPublicKey, nonce, signedNonce.signature.toByteArray())
+                            val message = ProtoBufHelper.buildVerifySignedNonce(acPublicKey, nonceBytes, signedNonce.signature.toByteArray())
                             if (message.valid) {
                                 sendMessage(deviceId, ActiveCardEvent.SIGNATURE_VERIFICATION_RESULT.id, message.toByteArray())
-                                val pubKeyMessage = IdentityPublicKey.newBuilder()
-                                    .setPubkey(ByteString.copyFrom(mobilePubKey))
-                                    .setSource("mobile")
-                                    .build()
+                                val pubKeyMessage = ProtoBufHelper.buildIdentityPublicKey(mobilePubKey, "mobile")
                                 sendMessage(deviceId, ActiveCardEvent.SEND_IDENTITY_PUBLIC_KEY.id, pubKeyMessage.toByteArray())
-                                onDone()
                             }
                             else throw ActiveCardException("cra-aks-008-00", "Signature verification failed")
                         }
+
+                        ActiveCardEvent.CHALLENGE -> {
+                            val nonce = NonceRequest.parseFrom(result.contents)
+                            val signedNonce = ProtoBufHelper.buildSignedNonce(nonce.nonce.toByteArray(), mobilePrivateKey)
+                            sendMessage(deviceId, ActiveCardEvent.SIGNED_NONCE.id, signedNonce.toByteArray())
+                        }
+
+                        ActiveCardEvent.SIGNATURE_VERIFICATION_RESULT -> {
+                            val verificationResult = SignatureVerificationResult.parseFrom(result.contents.toByteArray())
+                            if (!verificationResult.valid) throw ActiveCardException("cra-mks-008-01", "Signature verification failed")
+                            onDone()
+                        }
+
                         else -> {}
                     }
                 }
                 .launchIn(this)
-            sendMessage(deviceId, ActiveCardEvent.NONCE_REQUEST.id, byteArrayOf())
+            val nonce = ProtoBufHelper.buildNonceRequest(nonceBytes)
+            sendMessage(deviceId, ActiveCardEvent.CHALLENGE.id, nonce.toByteArray())
         }
     }
 
@@ -216,18 +226,4 @@ class ActiveCardClientImpl(
         return bleClient.negotiateMtuSize(deviceId, size)
     }
 
-    private fun verifySignedNonce(pubKey: ByteArray, nonce: ByteArray, signed: ByteArray): SignatureVerificationResult {
-        try {
-            val isVerified = Ed25519Signer.verify(pubKey, nonce, signed)
-            return SignatureVerificationResult.newBuilder()
-                .setValid(isVerified)
-                .setReason(if (isVerified) "Verification success" else "Verification failed")
-                .build()
-        } catch (e: Exception) {
-            return SignatureVerificationResult.newBuilder()
-                .setValid(false)
-                .setReason(e.message)
-                .build()
-        }
-    }
 }

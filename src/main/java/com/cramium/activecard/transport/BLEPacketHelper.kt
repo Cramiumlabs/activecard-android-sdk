@@ -1,9 +1,12 @@
 package com.cramium.activecard.transport
 
 import android.util.Log
+import com.cramium.activecard.SignatureVerificationResult
+import com.cramium.activecard.SignedNonce
 import com.cramium.activecard.TransportMessageWrapper
 import com.cramium.activecard.exception.ActiveCardException
 import com.cramium.activecard.utils.AesGcmHelper
+import com.cramium.activecard.utils.Ed25519Signer
 import com.google.protobuf.ByteString
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -199,6 +202,7 @@ class BLEPacketHelper {
             System.arraycopy(packet, 0, newPacket, header.size, packet.size)
             return newPacket
         }
+
     }
 
     fun emit(data: ByteArray) {
