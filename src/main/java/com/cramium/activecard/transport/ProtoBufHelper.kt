@@ -1,9 +1,12 @@
 package com.cramium.activecard.transport
 
+import com.cramium.activecard.EcdhPublicKey
 import com.cramium.activecard.IdentityPublicKey
 import com.cramium.activecard.NonceRequest
+import com.cramium.activecard.PairingConfirmation
 import com.cramium.activecard.SignatureVerificationResult
 import com.cramium.activecard.SignedNonce
+import com.cramium.activecard.UserIdentity
 import com.cramium.activecard.utils.Ed25519Signer
 import com.google.protobuf.ByteString
 
@@ -41,5 +44,26 @@ object ProtoBufHelper {
                 .setReason(e.message)
                 .build()
         }
+    }
+
+    fun buildPairingConfirmation(confirmed: Boolean): PairingConfirmation {
+        return PairingConfirmation.newBuilder()
+            .setConfirmed(confirmed)
+            .build()
+    }
+
+    fun buildUserIdentity(userId: String, privateKey: ByteArray): UserIdentity {
+        val encrypted = Ed25519Signer.sign(privateKey, userId.toByteArray())
+        return UserIdentity.newBuilder()
+            .setSignature(ByteString.copyFrom(encrypted))
+            .setEncryptedUserId(ByteString.copyFrom(userId.toByteArray()))
+            .build()
+    }
+
+    fun buildECDHPublicKey(key: ByteArray, source: String): EcdhPublicKey {
+        return EcdhPublicKey.newBuilder()
+            .setPublicKey(ByteString.copyFrom(key))
+            .setSource(source)
+            .build()
     }
 }

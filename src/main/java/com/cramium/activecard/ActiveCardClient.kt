@@ -112,6 +112,7 @@ interface ActiveCardClient {
      */
     fun subscribeToTx(deviceId: String): Flow<ByteArray>
 }
+
 /**
  * A default implementation of the [ActiveCardClient] interface, handling BLE/USB communication
  *
@@ -154,13 +155,12 @@ class ActiveCardClientImpl(
         bleClient.disconnectDevice(deviceId)
     }
 
-    override suspend  fun sendMessage(
+    override suspend fun sendMessage(
         deviceId: String,
         messageType: Int,
         content: ByteArray,
         isEncrypted: Boolean
     ) {
-        Log.d("ActiveCardImpl", "Sending message: $messageType")
         bleTransport.writeData(deviceId, messageType, content, isEncrypted)
     }
 
@@ -192,10 +192,13 @@ class ActiveCardClientImpl(
                     when (ActiveCardEvent.fromValue(result.messageType)) {
                         ActiveCardEvent.SIGNED_NONCE -> {
                             val signedNonce = SignedNonce.parseFrom(result.contents.toByteArray())
+                            Log.d("AC_Simulator", "Receive signed nonce event $signedNonce")
                             val message = ProtoBufHelper.buildVerifySignedNonce(acPublicKey, nonceBytes, signedNonce.signature.toByteArray())
                             if (message.valid) {
+                                Log.d("AC_Simulator", "Send signature verification result event $message")
                                 sendMessage(deviceId, ActiveCardEvent.SIGNATURE_VERIFICATION_RESULT.id, message.toByteArray())
                                 val pubKeyMessage = ProtoBufHelper.buildIdentityPublicKey(mobilePubKey, "mobile")
+                                Log.d("AC_Simulator", "Send mobile public key event $pubKeyMessage")
                                 sendMessage(deviceId, ActiveCardEvent.SEND_IDENTITY_PUBLIC_KEY.id, pubKeyMessage.toByteArray())
                             }
                             else throw ActiveCardException("cra-aks-008-00", "Signature verification failed")
@@ -203,12 +206,15 @@ class ActiveCardClientImpl(
 
                         ActiveCardEvent.CHALLENGE -> {
                             val nonce = NonceRequest.parseFrom(result.contents)
+                            Log.d("AC_Simulator", "Receive challenge event $nonce")
                             val signedNonce = ProtoBufHelper.buildSignedNonce(nonce.nonce.toByteArray(), mobilePrivateKey)
+                            Log.d("AC_Simulator", "Send signed nonce event $signedNonce")
                             sendMessage(deviceId, ActiveCardEvent.SIGNED_NONCE.id, signedNonce.toByteArray())
                         }
 
                         ActiveCardEvent.SIGNATURE_VERIFICATION_RESULT -> {
                             val verificationResult = SignatureVerificationResult.parseFrom(result.contents.toByteArray())
+                            Log.d("AC_Simulator", "Receive verification result event $verificationResult")
                             if (!verificationResult.valid) throw ActiveCardException("cra-mks-008-01", "Signature verification failed")
                             onDone()
                         }
@@ -218,7 +224,57 @@ class ActiveCardClientImpl(
                 }
                 .launchIn(this)
             val nonce = ProtoBufHelper.buildNonceRequest(nonceBytes)
+            Log.d("AC_Simulator", "Send challenge $nonce")
             sendMessage(deviceId, ActiveCardEvent.CHALLENGE.id, nonce.toByteArray())
+        }
+    }
+
+    fun shareSecretEstablishment(
+        deviceId: String
+    ): Job {
+        return scope.launch {
+            // TODO: Need generate ecdh from go-sdk
+            receiveMessage
+                .onEach { result ->
+                    when (ActiveCardEvent.fromValue(result.messageType)) {
+                        ActiveCardEvent.SEND_ECDH_PUBLIC_KEY -> {
+                            val ecdh = EcdhPublicKey.parseFrom(result.contents.toByteArray())
+                            // TODO: Derive shared ecdh key from active-card device
+                        }
+
+                        else -> {}
+                    }
+                }
+                .launchIn(this)
+            val keypair = byteArrayOf()
+            val ecdh = ProtoBufHelper.buildECDHPublicKey(keypair, "mobile")
+            sendMessage(deviceId, ActiveCardEvent.SEND_ECDH_PUBLIC_KEY.id, ecdh.toByteArray())
+        }
+    }
+
+    fun ownershipAssociate(
+        deviceId: String,
+        userId: String,
+        mobilePrivateKey: ByteArray,
+        onDone: () -> Unit,
+        onFailed: () -> Unit,
+    ): Job {
+        return scope.launch {
+            receiveMessage
+                .onEach { result ->
+                    when (ActiveCardEvent.fromValue(result.messageType)) {
+                        ActiveCardEvent.PAIRING_CONFIRMATION -> {
+                            val confirmation =
+                                PairingConfirmation.parseFrom(result.contents.toByteArray())
+                            if (confirmation.confirmed) onDone() else onFailed()
+                        }
+
+                        else -> {}
+                    }
+                }
+                .launchIn(this)
+            val userIdentity = ProtoBufHelper.buildUserIdentity(userId, mobilePrivateKey)
+            sendMessage(deviceId, ActiveCardEvent.SEND_USER_IDENTITY.id, userIdentity.toByteArray())
         }
     }
 

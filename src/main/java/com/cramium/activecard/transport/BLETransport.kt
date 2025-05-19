@@ -1,12 +1,14 @@
 package com.cramium.activecard.transport
 
 import android.util.Log
+import com.cramium.activecard.ActiveCardEvent
 import com.cramium.activecard.TransportMessageWrapper
 import com.cramium.activecard.ble.BleClient
 import com.cramium.activecard.ble.CharOperationFailed
 import com.cramium.activecard.exception.ActiveCardException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
@@ -58,6 +60,7 @@ class BLETransport(
         withContext(Dispatchers.IO) {
             for (packet in packets) {
                 withTimeout(500) {
+                    Log.d("AC_Simulator", "Sending message: ${ActiveCardEvent.fromValue(messageType)} - size: ${packet.size}")
                     val result =
                         bleClient.writeCharacteristicWithoutResponse(deviceId, TX_UUID, 0, packet)
                             .catch { e ->
@@ -69,6 +72,7 @@ class BLETransport(
                         throw ActiveCardException("cra-aks-008-00", "BLE write failed: ${result.errorMessage}")
                     }
                 }
+                delay(50)
             }
         }
     }

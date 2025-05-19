@@ -45,7 +45,6 @@ object AesGcmHelper {
     }
 
     fun decrypt(iv: ByteArray, tag: ByteArray, cipherText: ByteArray): ByteArray {
-        if (cipherText.isEmpty()) return byteArrayOf()
         val key = SecretKeySpec(decodeFromBase64(KEY), KEY_ALGORITHM)
         val cipherInput = cipherText + tag
         val cipher = Cipher.getInstance(TRANSFORMATION)

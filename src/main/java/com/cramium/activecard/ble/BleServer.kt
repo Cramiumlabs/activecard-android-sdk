@@ -115,7 +115,7 @@ class BleServerImpl(
             .setIncludeDeviceName(true)
             .addServiceUuid(ParcelUuid(BLETransport.UART_UUID))
             .build()
-
+        Log.d("AC_Simulator", "Start advertising with device name: $name")
         advertiser?.startAdvertising(settings, data, advertiseCallback)
     }
 
@@ -137,7 +137,7 @@ class BleServerImpl(
         delay(20)
         val service = gattServer?.getService(BLETransport.UART_UUID) ?: return
         val char = service.getCharacteristic(BLETransport.RX_UUID) ?: return
-        Log.d("BleGattServer", "notifyClients: ${data.toTypedArray()} - ${data.size}")
+        Log.d("AC_Simulator", "Send data to client - data size: ${data.size}")
         clients.forEach { device ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 gattServer?.notifyCharacteristicChanged(device, char, false, data)
@@ -202,7 +202,7 @@ class BleServerImpl(
             offset: Int,
             value: ByteArray
         ) {
-            Log.d("BleGattServer", "onCharacteristicWriteRequest: ${characteristic.uuid} - device: ${device.name} - value: ${value.size}")
+            Log.d("AC_Simulator", "On write request: ${characteristic.uuid} - value: ${value.size}")
             blePacketHelper.emit(value.copyOfRange(5, value.size))
             if (characteristic.uuid == BLETransport.TX_UUID) {
                 if (responseNeeded) {

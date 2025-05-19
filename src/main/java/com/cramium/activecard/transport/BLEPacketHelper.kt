@@ -25,7 +25,6 @@ class BLEPacketHelper {
     companion object {
         private const val AES_GCM_IV_LENGTH: Int = 12
         private const val AES_GCM_TAG_LENGTH: Int = 16
-        private const val AES_GCM_ENCRYPT_ENABLE_LENGTH: Int = 1
         private const val ENCRYPTED_FLAG: Byte = 1
         private const val UNENCRYPTED_FLAG: Byte = 0
         private val HEADERS = byteArrayOf(0x3F, 0x23, 0x23)
@@ -229,7 +228,7 @@ class BLEPacketHelper {
                 }
             }
             .filterNotNull()
-            .onEach { Log.d("BLEPacketHelper", "Received message: $it") }
+            .onEach { Log.d("AC_Simulator", "Received message: $it") }
             .shareIn(CoroutineScope(Dispatchers.IO), SharingStarted.Eagerly)
 }
 
