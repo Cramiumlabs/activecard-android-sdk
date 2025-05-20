@@ -134,7 +134,7 @@ class BleServerImpl(
 
     /** Send a notification to all connected clients */
     override suspend fun notifyClients(data: ByteArray) {
-        delay(20)
+        delay(50)
         val service = gattServer?.getService(BLETransport.UART_UUID) ?: return
         val char = service.getCharacteristic(BLETransport.RX_UUID) ?: return
         Log.d("AC_Simulator", "Send data to client - data size: ${data.size}")

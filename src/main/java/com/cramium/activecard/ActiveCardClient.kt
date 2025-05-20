@@ -14,6 +14,7 @@ import com.cramium.activecard.ble.model.ScanMode
 import com.cramium.activecard.exception.ActiveCardException
 import com.cramium.activecard.transport.BLETransport
 import com.cramium.activecard.transport.ProtoBufHelper
+import com.cramium.activecard.utils.Ed25519Signer
 import com.cramium.activecard.utils.generateNonce
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -230,7 +231,9 @@ class ActiveCardClientImpl(
     }
 
     fun shareSecretEstablishment(
-        deviceId: String
+        deviceId: String,
+        mobilePrivateKey: ByteArray,
+        acPublicKey: ByteArray,
     ): Job {
         return scope.launch {
             // TODO: Need generate ecdh from go-sdk
@@ -239,15 +242,21 @@ class ActiveCardClientImpl(
                     when (ActiveCardEvent.fromValue(result.messageType)) {
                         ActiveCardEvent.SEND_ECDH_PUBLIC_KEY -> {
                             val ecdh = EcdhPublicKey.parseFrom(result.contents.toByteArray())
-                            // TODO: Derive shared ecdh key from active-card device
+                            val verify = Ed25519Signer.verify(acPublicKey, ecdh.publicKey.toByteArray(), ecdh.signature.toByteArray())
+                            if (verify) {
+                                // TODO: Derive shared ecdh key from active-card device
+                            } else {
+                                throw ActiveCardException("cra-aks-008-00", "Signature verification failed")
+                            }
                         }
 
                         else -> {}
                     }
                 }
                 .launchIn(this)
-            val keypair = byteArrayOf()
-            val ecdh = ProtoBufHelper.buildECDHPublicKey(keypair, "mobile")
+            val keypair = byteArrayOf() // TODO: Generate ecdh keypair from go-sdk here
+            val signature = Ed25519Signer.sign(mobilePrivateKey, keypair)
+            val ecdh = ProtoBufHelper.buildECDHPublicKey(keypair, "mobile", signature)
             sendMessage(deviceId, ActiveCardEvent.SEND_ECDH_PUBLIC_KEY.id, ecdh.toByteArray())
         }
     }

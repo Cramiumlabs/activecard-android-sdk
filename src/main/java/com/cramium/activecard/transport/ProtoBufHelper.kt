@@ -60,10 +60,11 @@ object ProtoBufHelper {
             .build()
     }
 
-    fun buildECDHPublicKey(key: ByteArray, source: String): EcdhPublicKey {
+    fun buildECDHPublicKey(key: ByteArray, source: String, signature: ByteArray): EcdhPublicKey {
         return EcdhPublicKey.newBuilder()
             .setPublicKey(ByteString.copyFrom(key))
             .setSource(source)
+            .setSignature(ByteString.copyFrom(signature))
             .build()
     }
 }

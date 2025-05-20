@@ -130,16 +130,25 @@ class ActiveCardServerImpl(
                 }
             }
     }
-    fun shareSecretEstablishment(): Flow<Unit> {
+    fun shareSecretEstablishment(
+        acPrivateKey: ByteArray,
+        mobilePublicKey: ByteArray,
+    ): Flow<Unit> {
         return bleServer.receiveMessage
             .map { result ->
                 when (ActiveCardEvent.fromValue(result.messageType)) {
                     ActiveCardEvent.SEND_ECDH_PUBLIC_KEY -> {
                         val ecdhMobile = EcdhPublicKey.parseFrom(result.contents.toByteArray())
-                        // TODO: Derive shared ecdh key from active-card device
-                        val keypair = byteArrayOf()
-                        val ecdhActiveCard = ProtoBufHelper.buildECDHPublicKey(keypair, "active_card")
-                        sendMessage(ActiveCardEvent.SEND_ECDH_PUBLIC_KEY.id, ecdhActiveCard.toByteArray())
+                        val verify = Ed25519Signer.verify(mobilePublicKey, ecdhMobile.publicKey.toByteArray(), ecdhMobile.signature.toByteArray())
+                        if (verify) {
+                            val keypair = byteArrayOf()  // TODO: Generate ecdh keypair from go-sdk here
+                            val signature = Ed25519Signer.sign(acPrivateKey, keypair)
+                            val ecdhActiveCard = ProtoBufHelper.buildECDHPublicKey(keypair, "active_card", signature)
+                            sendMessage(ActiveCardEvent.SEND_ECDH_PUBLIC_KEY.id, ecdhActiveCard.toByteArray())
+                            // TODO: Derive shared ecdh key from mobile device
+                        } else {
+                            throw ActiveCardException("cra-aks-008-00", "Signature verification failed")
+                        }
                     }
                     else -> {}
                 }

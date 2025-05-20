@@ -7,4 +7,5 @@ option java_package = "com.cramium.activecard";
 message EcdhPublicKey {
   bytes public_key = 1;
   string source = 2;
+  bytes signature = 3;
 }
