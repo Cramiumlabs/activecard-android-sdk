@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package com.cramium.sdk;
+option java_multiple_files = true;
+option java_package = "com.cramium.activecard";
+
+message GroupData {
+  string group_id = 1;
+  bytes data = 2;
+}

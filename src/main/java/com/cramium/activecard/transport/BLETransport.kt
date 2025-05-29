@@ -6,6 +6,8 @@ import com.cramium.activecard.TransportMessageWrapper
 import com.cramium.activecard.ble.BleClient
 import com.cramium.activecard.ble.CharOperationFailed
 import com.cramium.activecard.exception.ActiveCardException
+import com.cramium.activecard.transport.BLEPacketHelper.Companion.buildFullMessagePayload
+import com.cramium.activecard.transport.BLEPacketHelper.Companion.splitMessageIntoPackets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -32,6 +34,7 @@ class BLETransport(
     override val connectionType: ConnectionType = ConnectionType.BLE
     private val packetHelper = BLEPacketHelper()
     val receiveMessage get() = packetHelper.receiveMessage
+
     override fun writeData(data: TransportMessageWrapper): Boolean {
         return true
     }
@@ -55,11 +58,33 @@ class BLETransport(
     }
 
 
+    suspend fun writeData(deviceId: String, message: TransportMessageWrapper) {
+        val fullMessage = buildFullMessagePayload(message)
+        val packets = splitMessageIntoPackets(fullMessage)
+        withContext(Dispatchers.IO) {
+            for (packet in packets) {
+                withTimeout(50) {
+                    val result =
+                        bleClient.writeCharacteristicWithoutResponse(deviceId, TX_UUID, 0, packet)
+                            .catch { e ->
+                                // Flow emission error (e.g. BLE stack failure)
+                                throw ActiveCardException("cra-aks-008-00", "BLE write-flow error", e)
+                            }
+                            .first()
+                    if (result is CharOperationFailed) {
+                        throw ActiveCardException("cra-aks-008-00", "BLE write failed: ${result.errorMessage}")
+                    }
+                }
+                delay(20)
+            }
+        }
+    }
+
     suspend fun writeData(deviceId: String, messageType: Int, content: ByteArray, isEncrypted: Boolean) {
         val packets = BLEPacketHelper.prepareMessagePackets(messageType, content, isEncrypted)
         withContext(Dispatchers.IO) {
             for (packet in packets) {
-                withTimeout(500) {
+                withTimeout(50) {
                     Log.d("AC_Simulator", "Sending message: ${ActiveCardEvent.fromValue(messageType)} - size: ${packet.size}")
                     val result =
                         bleClient.writeCharacteristicWithoutResponse(deviceId, TX_UUID, 0, packet)
@@ -72,7 +97,7 @@ class BLETransport(
                         throw ActiveCardException("cra-aks-008-00", "BLE write failed: ${result.errorMessage}")
                     }
                 }
-                delay(50)
+                delay(20)
             }
         }
     }

@@ -21,7 +21,6 @@ import android.util.Log
 import com.cramium.activecard.TransportMessageWrapper
 import com.cramium.activecard.transport.BLEPacketHelper
 import com.cramium.activecard.transport.BLETransport
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharedFlow
 import java.util.Arrays
 import java.util.UUID
@@ -31,7 +30,7 @@ interface BleServer {
     val connectedDevices: Set<BluetoothDevice>
     fun start(name: String = "AC_Simulator")
     fun stop()
-    suspend fun notifyClients(data: ByteArray)
+    fun notifyClients(data: ByteArray)
     fun disconnectDevice(device: BluetoothDevice)
 }
 
@@ -133,8 +132,7 @@ class BleServerImpl(
     }
 
     /** Send a notification to all connected clients */
-    override suspend fun notifyClients(data: ByteArray) {
-        delay(50)
+    override fun notifyClients(data: ByteArray) {
         val service = gattServer?.getService(BLETransport.UART_UUID) ?: return
         val char = service.getCharacteristic(BLETransport.RX_UUID) ?: return
         Log.d("AC_Simulator", "Send data to client - data size: ${data.size}")

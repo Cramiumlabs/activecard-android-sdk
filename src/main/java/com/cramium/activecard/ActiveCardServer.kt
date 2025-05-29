@@ -10,9 +10,20 @@ import com.cramium.activecard.transport.BLEPacketHelper
 import com.cramium.activecard.transport.ProtoBufHelper
 import com.cramium.activecard.utils.Ed25519Signer
 import com.cramium.activecard.utils.generateNonce
+import com.cramium.sdk.client.LocalPartyCallback
+import com.cramium.sdk.client.MpcClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -60,17 +71,21 @@ interface ActiveCardServer {
         saveMobilePublicKey: (ByteArray) -> Unit,
         onDone: () -> Unit = {}
     ): Flow<Unit>
+
+    fun keygen(): Job
 }
 
 
 @SuppressLint("MissingPermission")
 class ActiveCardServerImpl(
-    context: Context
+    context: Context,
+    private val callback: ActiveCardServerCallback,
+    private val mpcClient: MpcClient
 ) : ActiveCardServer {
     private val bleServer: BleServer = BleServerImpl(context)
-
     override val receiveMessage: SharedFlow<TransportMessageWrapper>
         get() = bleServer.receiveMessage
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun startAdvertising(deviceName: String) {
         bleServer.start(deviceName)
@@ -179,10 +194,74 @@ class ActiveCardServerImpl(
             }
     }
 
+    private var keygenJob: Job? = null
+    override fun keygen(): Job {
+        return scope.launch {
+            callback.sendMessage
+                .onEach {
+                    Log.d("AC_Simulator", "Send message: $it")
+                    sendMessage(it)
+                }
+                .launchIn(this@launch)
+
+            bleServer.receiveMessage
+                .onEach { result ->
+                    when (ActiveCardEvent.fromValue(result.messageType)) {
+                        ActiveCardEvent.KG_INIT_MNEMONIC_KEYGEN_PROCESS -> {
+                            keygenJob?.cancel()
+                            keygenJob = null
+                            val mnemonicKeygenProcess = MnemonicKeygenProcess.parseFrom(result.contents)
+                            Log.d("AC_Simulator", "Receive KG_INIT_MNEMONIC_KEYGEN_PROCESS event $mnemonicKeygenProcess")
+                            keygenJob = mpcClient.localPartyMnemonicKeyGen(mnemonicKeygenProcess.groupId, mnemonicKeygenProcess.secretNumber)
+                        }
+                        ActiveCardEvent.KG_INIT_MNEMONIC_PAILLIER_PROCESS -> {
+                            val paillierProcess = PaillierProcess.parseFrom(result.contents)
+                            mpcClient.localPartyPaillier(paillierProcess.groupId)
+                        }
+                        ActiveCardEvent.KG_STORE_EXTERNAL_PARTY_IDENTITY_PUBKEY -> {
+                            val groupData = GroupData.parseFrom(result.contents)
+                            mpcClient.localPartySaveExternalPartyIdentityPublicKey(groupData.groupId, groupData.data.toByteArray())
+                            Log.d("AC_Simulator", "Receive KG_STORE_EXTERNAL_PARTY_IDENTITY_PUBKEY event $groupData")
+                        }
+                        ActiveCardEvent.KG_STORE_GROUP_PARTY_DATA -> {
+                            val groupData = GroupData.parseFrom(result.contents)
+                            mpcClient.preparePartyGroupData(groupData.groupId, groupData.data.toByteArray())
+                            Log.d("AC_Simulator", "Receive KG_STORE_GROUP_PARTY_DATA event $groupData")
+                        }
+                        ActiveCardEvent.KG_STORE_PARTY_IDENTITY_PRIVATE_KEY -> {
+                            val groupData = GroupData.parseFrom(result.contents)
+                            mpcClient.saveInternalIdentityPrivateKey(groupData.groupId, groupData.data.toByteArray())
+                            Log.d("AC_Simulator", "Receive KG_STORE_PARTY_IDENTITY_PRIVATE_KEY event $groupData")
+                        }
+                        ActiveCardEvent.KG_SEND_EXCHANGE_MESSAGE -> {
+                            val exchangeMessage = ExchangeMessage.parseFrom(result.contents)
+                            mpcClient.inputPartyInMsg(exchangeMessage.groupId, exchangeMessage.msg.toByteArray())
+                            Log.d("AC_Simulator", "Receive KG_SEND_EXCHANGE_MESSAGE event $exchangeMessage")
+                        }
+//                        ActiveCardEvent.KG_SEND_PREPARE_PARTY_DATA -> {
+//                            val prepareData = ExchangeMessage.parseFrom(result.contents)
+//                            mpcClient.preparePartyGroupData(prepareData.groupId, prepareData.msg.toByteArray())
+//                        }
+                        else -> {}
+                    }
+                }
+                .launchIn(this@launch)
+        }
+    }
+
+    private suspend fun sendMessage(message: TransportMessageWrapper) {
+        val fullMessage = BLEPacketHelper.buildFullMessagePayload(message)
+        val packets = BLEPacketHelper.splitMessageIntoPackets(fullMessage)
+        for (packet in packets) {
+            delay(20)
+            bleServer.notifyClients(packet)
+        }
+    }
 
     private suspend fun sendMessage(messageType: Int, content: ByteArray) {
         val packets = BLEPacketHelper.prepareMessagePackets(messageType, content)
         for (packet in packets) {
+            delay(20)
             bleServer.notifyClients(packet)
         }
     }

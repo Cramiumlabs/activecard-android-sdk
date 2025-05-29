@@ -16,6 +16,7 @@ import com.cramium.activecard.transport.BLETransport
 import com.cramium.activecard.transport.ProtoBufHelper
 import com.cramium.activecard.utils.Ed25519Signer
 import com.cramium.activecard.utils.generateNonce
+import com.cramium.sdk.client.MpcClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -112,6 +113,8 @@ interface ActiveCardClient {
      * @return A [Flow] emitting raw [ByteArray] chunks as they arrive.
      */
     fun subscribeToTx(deviceId: String): Flow<ByteArray>
+
+    fun keygen(deviceId: String): Job
 }
 
 /**
@@ -120,9 +123,12 @@ interface ActiveCardClient {
  * @property context The [Context] used to initialize and manage resources for the underlying service.
  */
 class ActiveCardClientImpl(
-    private val context: Context
+    private val context: Context,
+    private val callback: ActiveCardClientCallback,
+    private val mpcClient: MpcClient
 ) : ActiveCardClient {
-    private val scope = CoroutineScope(Dispatchers.Default)
+    private var connectedDeviceId = ""
+    private val scope = CoroutineScope(Dispatchers.IO)
     private val bleClient: BleClient = BleClientImpl(context).apply {
         initializeClient()
         connectionUpdateSubject
@@ -130,7 +136,11 @@ class ActiveCardClientImpl(
                 when (connection) {
                     is ConnectionUpdateSuccess -> {
                         when (connection.connectionState) {
-                            ConnectionState.CONNECTED -> subscribeToTx(connection.deviceId).collect {}
+                            ConnectionState.CONNECTED -> {
+                                connectedDeviceId = connection.deviceId
+                                subscribeToTx(connection.deviceId).collect {}
+                            }
+
                             else -> {}
                         }
                     }
@@ -147,6 +157,9 @@ class ActiveCardClientImpl(
         get() = bleTransport.receiveMessage
     override val connectionUpdate: SharedFlow<ConnectionUpdate>
         get() = bleClient.connectionUpdateSubject
+
+    private var sendJob: Job? = null
+    private var keygenJob: Job? = null
 
     override fun connectToDevice(deviceId: String) {
         bleClient.connectToDevice(deviceId)
@@ -284,6 +297,37 @@ class ActiveCardClientImpl(
                 .launchIn(this)
             val userIdentity = ProtoBufHelper.buildUserIdentity(userId, mobilePrivateKey)
             sendMessage(deviceId, ActiveCardEvent.SEND_USER_IDENTITY.id, userIdentity.toByteArray())
+        }
+    }
+
+    override fun keygen(deviceId: String): Job {
+        return scope.launch {
+            callback.sendMessage
+                .onEach {
+                    Log.d("AC_Simulator", "Send message $deviceId - $it")
+                    delay(100)
+                    bleTransport.writeData(deviceId, it)
+                }
+                .launchIn(this)
+
+            receiveMessage
+                .onEach { result ->
+                    Log.d("AC_Simulator", "Receive message")
+                    when (ActiveCardEvent.fromValue(result.messageType)) {
+                        ActiveCardEvent.KG_ABORT -> throw ActiveCardException("cra-aks-008-00", "Keygen aborted")
+
+                        ActiveCardEvent.KG_ERROR -> throw ActiveCardException("cra-aks-008-00", "Keygen error")
+
+                        ActiveCardEvent.KG_SEND_EXCHANGE_MESSAGE -> {
+
+                            val exchangeMessage = ExchangeMessage.parseFrom(result.contents)
+                            mpcClient.inputPartyInMsg(exchangeMessage.groupId, exchangeMessage.msg.toByteArray())
+                        }
+                        // TODO: Don't care
+                        else -> {}
+                    }
+                }
+                .launchIn(this)
         }
     }
 

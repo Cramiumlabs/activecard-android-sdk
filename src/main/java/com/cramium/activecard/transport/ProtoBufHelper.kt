@@ -1,8 +1,12 @@
 package com.cramium.activecard.transport
 
 import com.cramium.activecard.EcdhPublicKey
+import com.cramium.activecard.ExchangeMessage
+import com.cramium.activecard.GroupData
 import com.cramium.activecard.IdentityPublicKey
+import com.cramium.activecard.MnemonicKeygenProcess
 import com.cramium.activecard.NonceRequest
+import com.cramium.activecard.PaillierProcess
 import com.cramium.activecard.PairingConfirmation
 import com.cramium.activecard.SignatureVerificationResult
 import com.cramium.activecard.SignedNonce
@@ -65,6 +69,33 @@ object ProtoBufHelper {
             .setPublicKey(ByteString.copyFrom(key))
             .setSource(source)
             .setSignature(ByteString.copyFrom(signature))
+            .build()
+    }
+
+    fun buildKeygenProcess(groupId: String, secretNumber: Long) : MnemonicKeygenProcess {
+        return MnemonicKeygenProcess.newBuilder()
+            .setGroupId(groupId)
+            .setSecretNumber(secretNumber)
+            .build()
+    }
+
+    fun buildGroupData(groupId: String, data: ByteArray): GroupData {
+        return GroupData.newBuilder()
+            .setGroupId(groupId)
+            .setData(ByteString.copyFrom(data))
+            .build()
+    }
+
+    fun buildPaillierProcess(groupId: String): PaillierProcess {
+        return PaillierProcess.newBuilder()
+            .setGroupId(groupId)
+            .build()
+    }
+
+    fun buildExchangeMessage(groupId: String, msg: ByteArray): ExchangeMessage {
+        return ExchangeMessage.newBuilder()
+            .setGroupId(groupId)
+            .setMsg(ByteString.copyFrom(msg))
             .build()
     }
 }

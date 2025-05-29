@@ -10,6 +10,7 @@ import com.cramium.activecard.utils.Ed25519Signer
 import com.google.protobuf.ByteString
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,7 +31,7 @@ class BLEPacketHelper {
         private val HEADERS = byteArrayOf(0x3F, 0x23, 0x23)
 
         private val PACKET_HEADER = byteArrayOf(109, 112, 99)
-        private const val PACKET_SIZE = 120
+        private const val PACKET_SIZE = 240
         private const val PACKET_HEADER_BUFFER_SIZE =
             3 + // 3 bytes header
             1 + // 1 byte encrypted flag
@@ -48,7 +49,7 @@ class BLEPacketHelper {
          * @param message The message to be built.
          * @return The full message payload as a byte array.
          */
-        private fun buildFullMessagePayload(message: TransportMessageWrapper): ByteArray {
+        fun buildFullMessagePayload(message: TransportMessageWrapper): ByteArray {
             val ivBytes = message.iv.toByteArray()
             val tagBytes = message.tag.toByteArray()
             val contentBytes = message.contents.toByteArray()
@@ -133,11 +134,18 @@ class BLEPacketHelper {
          * @return             A list of packet byte arrays.
          */
         fun prepareMessagePackets(messageType: Int, rawMessage: ByteArray, isEncrypted: Boolean = true): List<ByteArray> {
+            val messageWrapper = buildTransportMessageWrapper(messageType, rawMessage, isEncrypted)
+            Log.d("BLEPacketHelper", "Prepared message: $messageWrapper")
+            val fullMessage = buildFullMessagePayload(messageWrapper)
+            return splitMessageIntoPackets(fullMessage)
+        }
+
+        fun buildTransportMessageWrapper(messageType: Int, rawMessage: ByteArray, isEncrypted: Boolean = true): TransportMessageWrapper {
             val encryptedResult = AesGcmHelper.encrypt(rawMessage)
             val iv = if (isEncrypted) encryptedResult.iv else ByteArray(1) { 0 }
             val tag = if (isEncrypted) encryptedResult.tag else ByteArray(1) { 0 }
             val contents = if (isEncrypted) encryptedResult.cipherText else rawMessage
-            val messageWrapper = TransportMessageWrapper.newBuilder()
+            return TransportMessageWrapper.newBuilder()
                 .setMessageType(messageType)
                 .setMessageSize(rawMessage.size)
                 .setIsEncrypted(isEncrypted)
@@ -149,11 +157,7 @@ class BLEPacketHelper {
                 .setSessionId(ByteString.copyFrom(ByteArray(8) { it.toByte() }))
                 .setSessionStartTime(System.currentTimeMillis())
                 .build()
-            Log.d("BLEPacketHelper", "Prepared message: $messageWrapper")
-            val fullMessage = buildFullMessagePayload(messageWrapper)
-            return splitMessageIntoPackets(fullMessage)
         }
-
 
         /**
          * Splits a large byte array into smaller packets.
@@ -164,7 +168,7 @@ class BLEPacketHelper {
          * @param message The byte array to be split.
          * @return A list of byte arrays, where each byte array represents a packet.
          */
-        private fun splitMessageIntoPackets(message: ByteArray): List<ByteArray> {
+        fun splitMessageIntoPackets(message: ByteArray): List<ByteArray> {
             var segmentCounter = 0
             var startIndex = 0
             val packets = mutableListOf<ByteArray>()
@@ -209,7 +213,7 @@ class BLEPacketHelper {
     }
 
     private var combineArray = byteArrayOf()
-    private val _receiveMessage: MutableSharedFlow<ByteArray> = MutableSharedFlow(replay = 1)
+    private val _receiveMessage: MutableSharedFlow<ByteArray> = MutableSharedFlow(replay = 1, extraBufferCapacity = 500)
     val receiveMessage: SharedFlow<TransportMessageWrapper>
         get() = _receiveMessage
             .map { incoming ->
