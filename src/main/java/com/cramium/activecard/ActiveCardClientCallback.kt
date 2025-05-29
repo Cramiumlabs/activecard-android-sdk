@@ -72,7 +72,7 @@ class ActiveCardClientCallback: LocalPartyCallback {
         val exchangeMessage = ProtoBufHelper.buildExchangeMessage(groupId, msg)
         _sendMessage.tryEmit(
             BLEPacketHelper.buildTransportMessageWrapper(
-                ActiveCardEvent.KG_SEND_EXCHANGE_MESSAGE.id,
+                ActiveCardEvent.KG_ROUND_BROADCAST.id,
                 exchangeMessage.toByteArray()
             )
         )

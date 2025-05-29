@@ -10,20 +10,14 @@ import com.cramium.activecard.transport.BLEPacketHelper
 import com.cramium.activecard.transport.ProtoBufHelper
 import com.cramium.activecard.utils.Ed25519Signer
 import com.cramium.activecard.utils.generateNonce
-import com.cramium.sdk.client.LocalPartyCallback
 import com.cramium.sdk.client.MpcClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -195,6 +189,7 @@ class ActiveCardServerImpl(
     }
 
     private var keygenJob: Job? = null
+    private var paillierJob: Job? = null
     override fun keygen(): Job {
         return scope.launch {
             callback.sendMessage
@@ -215,8 +210,14 @@ class ActiveCardServerImpl(
                             keygenJob = mpcClient.localPartyMnemonicKeyGen(mnemonicKeygenProcess.groupId, mnemonicKeygenProcess.secretNumber)
                         }
                         ActiveCardEvent.KG_INIT_MNEMONIC_PAILLIER_PROCESS -> {
+                            paillierJob?.cancel()
+                            paillierJob = null
                             val paillierProcess = PaillierProcess.parseFrom(result.contents)
-                            mpcClient.localPartyPaillier(paillierProcess.groupId)
+                            Log.d("AC_Simulator", "Receive KG_INIT_MNEMONIC_PAILLIER_PROCESS event $paillierProcess")
+                            paillierJob = mpcClient.localPartyPaillier(paillierProcess.groupId) {
+                                paillierJob = null
+                            }
+                            Log.d("AC_Simulator", "End Receive KG_INIT_MNEMONIC_PAILLIER_PROCESS event $paillierProcess")
                         }
                         ActiveCardEvent.KG_STORE_EXTERNAL_PARTY_IDENTITY_PUBKEY -> {
                             val groupData = GroupData.parseFrom(result.contents)
@@ -233,7 +234,8 @@ class ActiveCardServerImpl(
                             mpcClient.saveInternalIdentityPrivateKey(groupData.groupId, groupData.data.toByteArray())
                             Log.d("AC_Simulator", "Receive KG_STORE_PARTY_IDENTITY_PRIVATE_KEY event $groupData")
                         }
-                        ActiveCardEvent.KG_SEND_EXCHANGE_MESSAGE -> {
+                        ActiveCardEvent.KG_ROUND_BROADCAST -> {
+                            if (paillierJob == null) delay(100)
                             val exchangeMessage = ExchangeMessage.parseFrom(result.contents)
                             mpcClient.inputPartyInMsg(exchangeMessage.groupId, exchangeMessage.msg.toByteArray())
                             Log.d("AC_Simulator", "Receive KG_SEND_EXCHANGE_MESSAGE event $exchangeMessage")
