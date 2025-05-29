@@ -319,8 +319,7 @@ class ActiveCardClientImpl(
                         ActiveCardEvent.KG_ERROR -> throw ActiveCardException("cra-aks-008-00", "Keygen error")
 
                         ActiveCardEvent.KG_ROUND_BROADCAST -> {
-
-                            val exchangeMessage = ExchangeMessage.parseFrom(result.contents)
+                            val exchangeMessage = BroadcastExchangeMessage.parseFrom(result.contents)
                             mpcClient.inputPartyInMsg(exchangeMessage.groupId, exchangeMessage.msg.toByteArray())
                         }
                         // TODO: Don't care

@@ -205,14 +205,14 @@ class ActiveCardServerImpl(
                         ActiveCardEvent.KG_INIT_MNEMONIC_KEYGEN_PROCESS -> {
                             keygenJob?.cancel()
                             keygenJob = null
-                            val mnemonicKeygenProcess = MnemonicKeygenProcess.parseFrom(result.contents)
+                            val mnemonicKeygenProcess = InitiateMnemonicKeyGen.parseFrom(result.contents)
                             Log.d("AC_Simulator", "Receive KG_INIT_MNEMONIC_KEYGEN_PROCESS event $mnemonicKeygenProcess")
                             keygenJob = mpcClient.localPartyMnemonicKeyGen(mnemonicKeygenProcess.groupId, mnemonicKeygenProcess.secretNumber)
                         }
                         ActiveCardEvent.KG_INIT_MNEMONIC_PAILLIER_PROCESS -> {
                             paillierJob?.cancel()
                             paillierJob = null
-                            val paillierProcess = PaillierProcess.parseFrom(result.contents)
+                            val paillierProcess = InitiatePaillierKeyGen.parseFrom(result.contents)
                             Log.d("AC_Simulator", "Receive KG_INIT_MNEMONIC_PAILLIER_PROCESS event $paillierProcess")
                             paillierJob = mpcClient.localPartyPaillier(paillierProcess.groupId) {
                                 paillierJob = null
@@ -236,14 +236,10 @@ class ActiveCardServerImpl(
                         }
                         ActiveCardEvent.KG_ROUND_BROADCAST -> {
                             if (paillierJob == null) delay(100)
-                            val exchangeMessage = ExchangeMessage.parseFrom(result.contents)
+                            val exchangeMessage = BroadcastExchangeMessage.parseFrom(result.contents)
                             mpcClient.inputPartyInMsg(exchangeMessage.groupId, exchangeMessage.msg.toByteArray())
                             Log.d("AC_Simulator", "Receive KG_SEND_EXCHANGE_MESSAGE event $exchangeMessage")
                         }
-//                        ActiveCardEvent.KG_SEND_PREPARE_PARTY_DATA -> {
-//                            val prepareData = ExchangeMessage.parseFrom(result.contents)
-//                            mpcClient.preparePartyGroupData(prepareData.groupId, prepareData.msg.toByteArray())
-//                        }
                         else -> {}
                     }
                 }
