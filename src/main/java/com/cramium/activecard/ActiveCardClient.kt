@@ -305,7 +305,7 @@ class ActiveCardClientImpl(
             callback.sendMessage
                 .onEach {
                     Log.d("AC_Simulator", "Send message $deviceId - $it")
-                    delay(100)
+                    delay(50)
                     bleTransport.writeData(deviceId, it)
                 }
                 .launchIn(this)

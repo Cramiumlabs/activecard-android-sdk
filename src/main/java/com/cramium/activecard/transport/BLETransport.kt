@@ -75,7 +75,7 @@ class BLETransport(
                         throw ActiveCardException("cra-aks-008-00", "BLE write failed: ${result.errorMessage}")
                     }
                 }
-                delay(20)
+                delay(10)
             }
         }
     }
@@ -97,7 +97,7 @@ class BLETransport(
                         throw ActiveCardException("cra-aks-008-00", "BLE write failed: ${result.errorMessage}")
                     }
                 }
-                delay(20)
+                delay(10)
             }
         }
     }

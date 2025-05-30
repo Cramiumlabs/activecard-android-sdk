@@ -213,7 +213,7 @@ class BLEPacketHelper {
     }
 
     private var combineArray = byteArrayOf()
-    private val _receiveMessage: MutableSharedFlow<ByteArray> = MutableSharedFlow(replay = 1, extraBufferCapacity = 500)
+    private val _receiveMessage: MutableSharedFlow<ByteArray> = MutableSharedFlow(replay = 1, extraBufferCapacity = 10000)
     val receiveMessage: SharedFlow<TransportMessageWrapper>
         get() = _receiveMessage
             .map { incoming ->

@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 
 class ActiveCardClientCallback: LocalPartyCallback {
-    private val _sendMessage: MutableSharedFlow<TransportMessageWrapper> = MutableSharedFlow(replay = 1, extraBufferCapacity = 300)
+    private val _sendMessage: MutableSharedFlow<TransportMessageWrapper> = MutableSharedFlow(replay = 1, extraBufferCapacity = 1000)
     val sendMessage: SharedFlow<TransportMessageWrapper>
         get() = _sendMessage
 
