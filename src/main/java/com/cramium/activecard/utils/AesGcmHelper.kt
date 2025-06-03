@@ -13,7 +13,8 @@ object AesGcmHelper {
     private val secureRandom = SecureRandom()
     private const val KEY = "R4I2mxBPKIeFdh/V7knb07LAnCIuGkNxPukQNkxRgus="
     private const val KEY_ALGORITHM = "AES"
-
+    private val key = SecretKeySpec(decodeFromBase64(KEY), KEY_ALGORITHM)
+    private val cipher = Cipher.getInstance(TRANSFORMATION)
     private fun encodeToBase64(bytes: ByteArray): String {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             // Java 8 Base64
@@ -33,9 +34,7 @@ object AesGcmHelper {
     }
 
     fun encrypt(plain: ByteArray): EncryptionResult {
-        val key = SecretKeySpec(decodeFromBase64(KEY), KEY_ALGORITHM)
         val iv = ByteArray(IV_SIZE_BYTES).apply { secureRandom.nextBytes(this) }
-        val cipher = Cipher.getInstance(TRANSFORMATION)
         val spec = GCMParameterSpec(TAG_SIZE_BITS, iv)
         cipher.init(Cipher.ENCRYPT_MODE, key, spec)
         val cipherOutput = cipher.doFinal(plain)
@@ -45,9 +44,7 @@ object AesGcmHelper {
     }
 
     fun decrypt(iv: ByteArray, tag: ByteArray, cipherText: ByteArray): ByteArray {
-        val key = SecretKeySpec(decodeFromBase64(KEY), KEY_ALGORITHM)
         val cipherInput = cipherText + tag
-        val cipher = Cipher.getInstance(TRANSFORMATION)
         val spec = GCMParameterSpec(TAG_SIZE_BITS, iv)
         cipher.init(Cipher.DECRYPT_MODE, key, spec)
         return cipher.doFinal(cipherInput)

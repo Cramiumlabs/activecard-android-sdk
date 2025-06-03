@@ -7,13 +7,17 @@ import com.cramium.activecard.TransportMessageWrapper
 import com.cramium.activecard.exception.ActiveCardException
 import com.cramium.activecard.utils.AesGcmHelper
 import com.cramium.activecard.utils.Ed25519Signer
+import com.cramium.sdk.utils.toHexString
 import com.google.protobuf.ByteString
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -21,6 +25,7 @@ import kotlinx.coroutines.flow.shareIn
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Arrays
+import javax.crypto.AEADBadTagException
 
 class BLEPacketHelper {
     companion object {
@@ -55,7 +60,7 @@ class BLEPacketHelper {
             val contentBytes = message.contents.toByteArray()
             val sessionIdBytes = message.sessionId.toByteArray()
             val sessionStart = message.sessionStartTime.toInt()
-
+            Log.d("BLEPacketHelper", "MessageType: Build ${message.messageType} IV: ${message.iv.toByteArray().toHexString()} - Tag: ${message.tag.toByteArray().toHexString()}")
             val buffer: ByteBuffer = if (message.isEncrypted) {
                 ByteBuffer.allocate(message.messageSize + PACKET_HEADER_BUFFER_SIZE + AES_GCM_IV_LENGTH + AES_GCM_TAG_LENGTH)
             } else {
@@ -84,39 +89,43 @@ class BLEPacketHelper {
          * @param payload The raw bytes (with headers, flags, IV/tag if present, etc.)
          */
         fun parseFullMessagePayload(payload: ByteArray): ParseResult {
-            val buffer = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
+            try {
+                val buffer = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
 
-            val header = ByteArray(HEADERS.size).also { buffer.get(it) }
-            if (!header.contentEquals(HEADERS)) return ParseResult.Error(
-                ActiveCardException("cra-aks-008-00", "Invalid header")
-            )
+                val header = ByteArray(HEADERS.size).also { buffer.get(it) }
+                if (!header.contentEquals(HEADERS)) return ParseResult.Error(
+                    ActiveCardException("cra-aks-008-00", "Invalid header")
+                )
 
-            val encrypted = buffer.get() == ENCRYPTED_FLAG
+                val encrypted = buffer.get() == ENCRYPTED_FLAG
 
-            val iv = if (encrypted) ByteArray(AES_GCM_IV_LENGTH).also { buffer.get(it) } else byteArrayOf()
-            val tag = if (encrypted) ByteArray(AES_GCM_TAG_LENGTH).also { buffer.get(it) } else byteArrayOf()
+                val iv = if (encrypted) ByteArray(AES_GCM_IV_LENGTH).also { buffer.get(it) } else byteArrayOf()
+                val tag = if (encrypted) ByteArray(AES_GCM_TAG_LENGTH).also { buffer.get(it) } else byteArrayOf()
 
-            val messageType = buffer.short.toInt() and 0xFFFF
-            val messageSize = buffer.int
+                val messageType = buffer.short.toInt() and 0xFFFF
+                val messageSize = buffer.int
 
-            val sessionIdBytes = ByteArray(8).also { buffer.get(it) }
-            val sessionStartTime = buffer.int.toLong()
+                val sessionIdBytes = ByteArray(8).also { buffer.get(it) }
+                val sessionStartTime = buffer.int.toLong()
 
-            if (buffer.remaining() < messageSize) return ParseResult.Partial(payload)
-
-            val rawContentBytes = ByteArray(messageSize).also { buffer.get(it) }
-            val contentBytes = if (encrypted) AesGcmHelper.decrypt(iv, tag, rawContentBytes) else rawContentBytes
-            val message = TransportMessageWrapper.newBuilder()
-                .setMessageType(messageType)
-                .setMessageSize(messageSize)
-                .setSessionId(ByteString.copyFrom(sessionIdBytes))
-                .setSessionStartTime(sessionStartTime)
-                .setContents(ByteString.copyFrom(contentBytes))
-                .setIv(ByteString.copyFrom(iv))
-                .setTag(ByteString.copyFrom(tag))
-                .setIsEncrypted(encrypted)
-                .build()
-            return ParseResult.Full(message)
+                if (buffer.remaining() < messageSize) return ParseResult.Partial(payload)
+                Log.d("BLEPacketHelper", "MessageType: Parse $messageType IV: ${iv.toHexString()} - Tag: ${tag.toHexString()}")
+                val rawContentBytes = ByteArray(messageSize).also { buffer.get(it) }
+                val contentBytes = if (encrypted) AesGcmHelper.decrypt(iv, tag, rawContentBytes) else rawContentBytes
+                val message = TransportMessageWrapper.newBuilder()
+                    .setMessageType(messageType)
+                    .setMessageSize(messageSize)
+                    .setSessionId(ByteString.copyFrom(sessionIdBytes))
+                    .setSessionStartTime(sessionStartTime)
+                    .setContents(ByteString.copyFrom(contentBytes))
+                    .setIv(ByteString.copyFrom(iv))
+                    .setTag(ByteString.copyFrom(tag))
+                    .setIsEncrypted(encrypted)
+                    .build()
+                return ParseResult.Full(message)
+            } catch (e: Exception) {
+                return ParseResult.Error(e)
+            }
         }
 
         /**
@@ -211,11 +220,10 @@ class BLEPacketHelper {
     fun emit(data: ByteArray) {
         _receiveMessage.tryEmit(data)
     }
-
+    private val shareScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var combineArray = byteArrayOf()
-    private val _receiveMessage: MutableSharedFlow<ByteArray> = MutableSharedFlow(replay = 1, extraBufferCapacity = 10000)
-    val receiveMessage: SharedFlow<TransportMessageWrapper>
-        get() = _receiveMessage
+    private val _receiveMessage: MutableSharedFlow<ByteArray> = MutableSharedFlow(extraBufferCapacity = 10000)
+    val receiveMessage: SharedFlow<TransportMessageWrapper> = _receiveMessage
             .map { incoming ->
                 combineArray += incoming
                 when (val parse = parseFullMessagePayload(combineArray)) {
@@ -232,8 +240,12 @@ class BLEPacketHelper {
                 }
             }
             .filterNotNull()
+            .catch { error ->
+                if (error is AEADBadTagException) Log.e("AC_Simulator", "AEADBadTagException: $error")
+                else throw error
+            }
             .onEach { Log.d("AC_Simulator", "Received message: $it") }
-            .shareIn(CoroutineScope(Dispatchers.IO), SharingStarted.Eagerly)
+            .shareIn(shareScope, SharingStarted.Eagerly)
 }
 
 sealed class ParseResult {
