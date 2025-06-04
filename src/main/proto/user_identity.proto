@@ -6,4 +6,5 @@ option java_package = "com.cramium.activecard";
 
 message UserIdentity {
   bytes encrypted_user_id = 1;
+  bytes signature = 2;
 }

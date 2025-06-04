@@ -11,11 +11,12 @@ import com.cramium.activecard.ble.MtuNegotiateResult
 import com.cramium.activecard.ble.ScanInfo
 import com.cramium.activecard.ble.model.ConnectionState
 import com.cramium.activecard.ble.model.ScanMode
-import com.cramium.activecard.exception.MpcException
+import com.cramium.activecard.exception.ActiveCardException
 import com.cramium.activecard.transport.BLETransport
-import com.cramium.activecard.utils.Constants.UNKNOWN_NONCE
+import com.cramium.activecard.transport.ProtoBufHelper
 import com.cramium.activecard.utils.Ed25519Signer
-import com.google.protobuf.ByteString
+import com.cramium.activecard.utils.generateNonce
+import com.cramium.sdk.client.MpcClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,42 +28,93 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 /**
- * An interface representing an active card device for BLE/USB communication. This interface
- * provides methods to initialize, connect, and interact with the underlying data transport layer.
+ * An interface representing an active card device for BLE/USB communication.
+ *
+ * This interface provides methods to initialize, connect, and interact with the underlying data transport layer.
  */
 interface ActiveCardClient {
+    /**
+     * A flow emitting connection status updates.
+     */
     val connectionUpdate: SharedFlow<ConnectionUpdate>
+
+    /**
+     * A flow emitting received messages from the device.
+     */
     val receiveMessage: SharedFlow<TransportMessageWrapper>
+
     /**
      * Attempts to connect to the active card device over the chosen transport channel (BLE or USB).
      *
-     * @return `true` if the connection is successfully initiated, `false` otherwise.
+     * @param deviceId The unique identifier of the target device.
      */
     fun connectToDevice(deviceId: String)
 
     /**
-     * Disconnects the active card device. Any ongoing communication will be halted.
+     * Disconnects from the active card device. Stops any ongoing communication.
+     *
+     * @param deviceId The unique identifier of the target device.
      */
     fun disconnect(deviceId: String)
 
+    /**
+     * Scans for available active card devices.
+     *
+     * @return A cold [Flow] emitting [ScanInfo] objects as devices are discovered.
+     */
     fun scanForDevices(): Flow<ScanInfo>
 
     /**
      * Sends a message to the active card device.
      *
+     * @param deviceId    The unique identifier of the target device.
      * @param messageType An integer representing the type of the message (defined by your protocol).
-     * @param content The payload to be sent, as a [ByteArray].
+     * @param content     The payload to be sent, as a [ByteArray].
      * @param isEncrypted A flag indicating whether the content is already encrypted.
-     * Currently not used for additional logic, but can be extended in the future for
-     * handling encryption within the method.
      */
-    suspend fun sendMessage(deviceId: String, messageType: Int, content: ByteArray, isEncrypted: Boolean  = false)
+    suspend fun sendMessage(
+        deviceId: String,
+        messageType: Int,
+        content: ByteArray,
+        isEncrypted: Boolean = true
+    )
 
-    fun authenticateFlow(deviceId: String, acPublicKey: ByteArray, mobilePubKey: ByteArray, onDone: () -> Unit): Job
+    /**
+     * Performs an authentication handshake with the active card device.
+     *
+     * @param deviceId     The unique identifier of the target device.
+     * @param acPublicKey  The ActiveCard's public key bytes.
+     * @param mobilePubKey The mobile device's public key bytes.
+     * @param mobilePrivateKey The mobile device's private key bytes.
+     * @param onDone       Callback invoked when authentication completes.
+     * @return A [Job] representing the authentication coroutine.
+     */
+    fun authenticateFlow(
+        deviceId: String,
+        acPublicKey: ByteArray,
+        mobilePubKey: ByteArray,
+        mobilePrivateKey: ByteArray,
+        onDone: () -> Unit
+    ): Job
 
+    /**
+     * Negotiates the MTU size for BLE characteristic transfers.
+     *
+     * @param deviceId The unique identifier of the target device.
+     * @param size     The desired MTU size in bytes.
+     * @return A [Flow] emitting [MtuNegotiateResult] values.
+     */
     fun negotiateMtuSize(deviceId: String, size: Int): Flow<MtuNegotiateResult>
 
+    /**
+     * Subscribes to the device’s TX characteristic to receive incoming data.
+     *
+     * @param deviceId The unique identifier of the target device.
+     * @return A [Flow] emitting raw [ByteArray] chunks as they arrive.
+     */
     fun subscribeToTx(deviceId: String): Flow<ByteArray>
+
+    fun keygen(deviceId: String): Job
 }
 
 /**
@@ -71,10 +123,12 @@ interface ActiveCardClient {
  * @property context The [Context] used to initialize and manage resources for the underlying service.
  */
 class ActiveCardClientImpl(
-    private val context: Context
+    private val context: Context,
+    private val callback: ActiveCardClientCallback,
+    private val mpcClient: MpcClient
 ) : ActiveCardClient {
-    private var nonce = UNKNOWN_NONCE
-    private val scope = CoroutineScope(Dispatchers.Default)
+    private var connectedDeviceId = ""
+    private val scope = CoroutineScope(Dispatchers.IO)
     private val bleClient: BleClient = BleClientImpl(context).apply {
         initializeClient()
         connectionUpdateSubject
@@ -82,7 +136,11 @@ class ActiveCardClientImpl(
                 when (connection) {
                     is ConnectionUpdateSuccess -> {
                         when (connection.connectionState) {
-                            ConnectionState.CONNECTED -> subscribeToTx(connection.deviceId).collect {}
+                            ConnectionState.CONNECTED -> {
+                                connectedDeviceId = connection.deviceId
+                                subscribeToTx(connection.deviceId).collect {}
+                            }
+
                             else -> {}
                         }
                     }
@@ -100,6 +158,9 @@ class ActiveCardClientImpl(
     override val connectionUpdate: SharedFlow<ConnectionUpdate>
         get() = bleClient.connectionUpdateSubject
 
+    private var sendJob: Job? = null
+    private var keygenJob: Job? = null
+
     override fun connectToDevice(deviceId: String) {
         bleClient.connectToDevice(deviceId)
     }
@@ -108,24 +169,13 @@ class ActiveCardClientImpl(
         bleClient.disconnectDevice(deviceId)
     }
 
-    override suspend  fun sendMessage(
+    override suspend fun sendMessage(
         deviceId: String,
         messageType: Int,
         content: ByteArray,
         isEncrypted: Boolean
     ) {
-        Log.d("ActiveCardImpl", "Sending message: $messageType")
-        val messageWrapper = TransportMessageWrapper.newBuilder()
-            .setMessageType(messageType)
-            .setMessageSize(content.size)
-            .setIsEncrypted(isEncrypted)
-            .setIv(ByteString.copyFrom(ByteArray(1) { 0 }))
-            .setTag(ByteString.copyFrom(ByteArray(1) { 0 }))
-            .setContents(ByteString.copyFrom(content))
-            .setSessionId(ByteString.copyFrom(ByteArray(8) { it.toByte() }))
-            .setSessionStartTime(System.currentTimeMillis())
-            .build()
-        bleTransport.writeData(deviceId, messageWrapper)
+        bleTransport.writeData(deviceId, messageType, content, isEncrypted)
     }
 
     override fun scanForDevices(): Flow<ScanInfo> {
@@ -145,34 +195,138 @@ class ActiveCardClientImpl(
         deviceId: String,
         acPublicKey: ByteArray,
         mobilePubKey: ByteArray,
+        mobilePrivateKey: ByteArray,
         onDone: () -> Unit
     ): Job {
-        nonce = UNKNOWN_NONCE
+        val nonceBytes = generateNonce()
         return scope.launch {
             delay(2000)
             receiveMessage
                 .onEach { result ->
                     when (ActiveCardEvent.fromValue(result.messageType)) {
-                        ActiveCardEvent.NONCE_RESPONSE -> nonce = NonceResponse.parseFrom(result.contents).nonce.toByteArray()
                         ActiveCardEvent.SIGNED_NONCE -> {
                             val signedNonce = SignedNonce.parseFrom(result.contents.toByteArray())
-                            val message = verifySignedNonce(acPublicKey, nonce, signedNonce.signature.toByteArray())
+                            Log.d("AC_Simulator", "Receive signed nonce event $signedNonce")
+                            val message = ProtoBufHelper.buildVerifySignedNonce(acPublicKey, nonceBytes, signedNonce.signature.toByteArray())
                             if (message.valid) {
+                                Log.d("AC_Simulator", "Send signature verification result event $message")
                                 sendMessage(deviceId, ActiveCardEvent.SIGNATURE_VERIFICATION_RESULT.id, message.toByteArray())
-                                val pubKeyMessage = IdentityPublicKey.newBuilder()
-                                    .setPubkey(ByteString.copyFrom(mobilePubKey))
-                                    .setSource("mobile")
-                                    .build()
+                                val pubKeyMessage = ProtoBufHelper.buildIdentityPublicKey(mobilePubKey, "mobile")
+                                Log.d("AC_Simulator", "Send mobile public key event $pubKeyMessage")
                                 sendMessage(deviceId, ActiveCardEvent.SEND_IDENTITY_PUBLIC_KEY.id, pubKeyMessage.toByteArray())
-                                onDone()
                             }
-                            else throw MpcException("cra-mks-008-00", "Signature verification failed")
+                            else throw ActiveCardException("cra-aks-008-00", "Signature verification failed")
                         }
+
+                        ActiveCardEvent.CHALLENGE -> {
+                            val nonce = NonceRequest.parseFrom(result.contents)
+                            Log.d("AC_Simulator", "Receive challenge event $nonce")
+                            val signedNonce = ProtoBufHelper.buildSignedNonce(nonce.nonce.toByteArray(), mobilePrivateKey)
+                            Log.d("AC_Simulator", "Send signed nonce event $signedNonce")
+                            sendMessage(deviceId, ActiveCardEvent.SIGNED_NONCE.id, signedNonce.toByteArray())
+                        }
+
+                        ActiveCardEvent.SIGNATURE_VERIFICATION_RESULT -> {
+                            val verificationResult = SignatureVerificationResult.parseFrom(result.contents.toByteArray())
+                            Log.d("AC_Simulator", "Receive verification result event $verificationResult")
+                            if (!verificationResult.valid) throw ActiveCardException("cra-mks-008-01", "Signature verification failed")
+                            onDone()
+                        }
+
                         else -> {}
                     }
                 }
                 .launchIn(this)
-            sendMessage(deviceId, ActiveCardEvent.NONCE_REQUEST.id, byteArrayOf())
+            val nonce = ProtoBufHelper.buildNonceRequest(nonceBytes)
+            Log.d("AC_Simulator", "Send challenge $nonce")
+            sendMessage(deviceId, ActiveCardEvent.CHALLENGE.id, nonce.toByteArray())
+        }
+    }
+
+    fun shareSecretEstablishment(
+        deviceId: String,
+        mobilePrivateKey: ByteArray,
+        acPublicKey: ByteArray,
+    ): Job {
+        return scope.launch {
+            // TODO: Need generate ecdh from go-sdk
+            receiveMessage
+                .onEach { result ->
+                    when (ActiveCardEvent.fromValue(result.messageType)) {
+                        ActiveCardEvent.SEND_ECDH_PUBLIC_KEY -> {
+                            val ecdh = EcdhPublicKey.parseFrom(result.contents.toByteArray())
+                            val verify = Ed25519Signer.verify(acPublicKey, ecdh.publicKey.toByteArray(), ecdh.signature.toByteArray())
+                            if (verify) {
+                                // TODO: Derive shared ecdh key from active-card device
+                            } else {
+                                throw ActiveCardException("cra-aks-008-00", "Signature verification failed")
+                            }
+                        }
+
+                        else -> {}
+                    }
+                }
+                .launchIn(this)
+            val keypair = byteArrayOf() // TODO: Generate ecdh keypair from go-sdk here
+            val signature = Ed25519Signer.sign(mobilePrivateKey, keypair)
+            val ecdh = ProtoBufHelper.buildECDHPublicKey(keypair, "mobile", signature)
+            sendMessage(deviceId, ActiveCardEvent.SEND_ECDH_PUBLIC_KEY.id, ecdh.toByteArray())
+        }
+    }
+
+    fun ownershipAssociate(
+        deviceId: String,
+        userId: String,
+        mobilePrivateKey: ByteArray,
+        onDone: () -> Unit,
+        onFailed: () -> Unit,
+    ): Job {
+        return scope.launch {
+            receiveMessage
+                .onEach { result ->
+                    when (ActiveCardEvent.fromValue(result.messageType)) {
+                        ActiveCardEvent.PAIRING_CONFIRMATION -> {
+                            val confirmation =
+                                PairingConfirmation.parseFrom(result.contents.toByteArray())
+                            if (confirmation.confirmed) onDone() else onFailed()
+                        }
+
+                        else -> {}
+                    }
+                }
+                .launchIn(this)
+            val userIdentity = ProtoBufHelper.buildUserIdentity(userId, mobilePrivateKey)
+            sendMessage(deviceId, ActiveCardEvent.SEND_USER_IDENTITY.id, userIdentity.toByteArray())
+        }
+    }
+
+    override fun keygen(deviceId: String): Job {
+        return scope.launch {
+            callback.sendMessage
+                .onEach {
+                    Log.d("AC_Simulator", "Send message $deviceId - $it")
+                    delay(50)
+                    bleTransport.writeData(deviceId, it)
+                }
+                .launchIn(this)
+
+            receiveMessage
+                .onEach { result ->
+                    Log.d("AC_Simulator", "Receive message")
+                    when (ActiveCardEvent.fromValue(result.messageType)) {
+                        ActiveCardEvent.KG_ABORT -> throw ActiveCardException("cra-aks-008-00", "Keygen aborted")
+
+                        ActiveCardEvent.KG_ERROR -> throw ActiveCardException("cra-aks-008-00", "Keygen error")
+
+                        ActiveCardEvent.KG_ROUND_BROADCAST -> {
+                            val exchangeMessage = BroadcastExchangeMessage.parseFrom(result.contents)
+                            mpcClient.inputPartyInMsg(exchangeMessage.groupId, exchangeMessage.msg.toByteArray())
+                        }
+                        // TODO: Don't care
+                        else -> {}
+                    }
+                }
+                .launchIn(this)
         }
     }
 
@@ -180,18 +334,4 @@ class ActiveCardClientImpl(
         return bleClient.negotiateMtuSize(deviceId, size)
     }
 
-    private fun verifySignedNonce(pubKey: ByteArray, nonce: ByteArray, signed: ByteArray): SignatureVerificationResult {
-        try {
-            val isVerified = Ed25519Signer.verify(pubKey, nonce, signed)
-            return SignatureVerificationResult.newBuilder()
-                .setValid(isVerified)
-                .setReason(if (isVerified) "Verification success" else "Verification failed")
-                .build()
-        } catch (e: Exception) {
-            return SignatureVerificationResult.newBuilder()
-                .setValid(false)
-                .setReason(e.message)
-                .build()
-        }
-    }
 }

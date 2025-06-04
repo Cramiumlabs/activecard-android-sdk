@@ -100,7 +100,7 @@ class BleClientImpl(private val context: Context) : BleClient {
     private val connectionQueue = ConnectionQueue()
     private val allConnections = CompositeDisposable()
     private val _connectionUpdateSubject: MutableSharedFlow<ConnectionUpdate> =
-        MutableSharedFlow(replay = 1)
+        MutableSharedFlow(replay = 1, extraBufferCapacity = 1)
     override val connectionUpdateSubject: SharedFlow<ConnectionUpdate>
         get() = _connectionUpdateSubject
 

@@ -4,8 +4,7 @@ package com.cramium.sdk;
 option java_multiple_files = true;
 option java_package = "com.cramium.activecard";
 
-message EcdhPublicKey {
-  bytes public_key = 1;
-  string source = 2;
-  bytes signature = 3;
+message BroadcastExchangeMessage {
+  string group_id = 1;
+  bytes msg = 2;
 }
