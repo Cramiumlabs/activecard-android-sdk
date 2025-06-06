@@ -55,6 +55,31 @@ The `message_type` field in `TransportMessageWrapper` uses these enum values to 
 
 ![](https://t9018252776.p.clickup-attachments.com/t9018252776/b60ebbc5-27f3-4e29-a715-c16a6cd1ba16/image.png)
 
+
+```mermaid
+sequenceDiagram
+    participant MobileDevice
+    participant Firmware
+    Firmware->>Firmware: Generate firmware identity key pair
+    MobileDevice->>MobileDevice: Scan QR Code from Active Card
+    MobileDevice->>MobileDevice: Extract firmware_identity_public_key
+    MobileDevice->>Firmware: Connect via BLE
+    MobileDevice->>Firmware: challenge with nonce
+    Firmware-->>MobileDevice: Signature(Sign(nonce, firmware_identity_private_key))
+    MobileDevice->>MobileDevice: Verify using firmware_identity_public_key
+    alt ❌ Invalid signature
+        MobileDevice->>MobileDevice: Abort if invalid signature
+    else ✅ Valid signature
+        MobileDevice->>MobileDevice: Generate mobile identity key pair
+        MobileDevice->>Firmware: Send mobile identity public key
+        Firmware->>Firmware: Store mobile identity key
+        Firmware->>MobileDevice: challenge with nonce
+        MobileDevice-->>Firmware: Signature(Sign(nonce, mobile_identity_private_key))
+        Firmware->>Firmware: Verify using mobile_identity_public_key
+    end
+
+```
+
 ### 1.2 QR code data format
 
 ```plain
@@ -123,6 +148,23 @@ message IdentityPublicKey {
 ### 2.1 Sequence Diagram: Shared Secret Establishment
 
 ![](https://t9018252776.p.clickup-attachments.com/t9018252776/5c4eba1b-0a63-47a4-ae23-47f6f2c2dfb5/image.png)
+
+```mermaid
+sequenceDiagram
+    participant MobileDevice
+    participant Firmware
+
+    MobileDevice->>MobileDevice: Generate ECDH Key Pair (P-256)
+    MobileDevice->>Firmware: Send ECDH Public Key + Signature (signed with Identity Private Key)
+
+    Firmware->>Firmware: Generate ECDH Key Pair (P-256)
+    Firmware->>MobileDevice: Send ECDH Public Key + Signature (signed with Identity Private Key)
+
+    MobileDevice->>MobileDevice: Derive Shared_Secret = ECDH(mobile_private, firmware_public)
+    Firmware->>Firmware: Derive Shared_Secret = ECDH(firmware_private, mobile_public)
+
+    Note over MobileDevice,Firmware: Shared_Secret used for MPC operations
+```
 
 ### 2.2 Commands & Messages
 
