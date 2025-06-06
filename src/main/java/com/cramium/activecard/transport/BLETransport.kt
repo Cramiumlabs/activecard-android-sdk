@@ -33,7 +33,7 @@ class BLETransport(
     private var txJob: Job? = null
     override val connectionType: ConnectionType = ConnectionType.BLE
     private val packetHelper = BLEPacketHelper()
-    val receiveMessage get() = packetHelper.receiveMessage
+    val receiveMessage = packetHelper.receiveMessage
 
     override fun writeData(data: TransportMessageWrapper): Boolean {
         return true
@@ -41,20 +41,7 @@ class BLETransport(
 
     override fun readData(data: ByteArray): Boolean {
         packetHelper.emit(data)
-        cachedBuf = if (cachedBuf == null) byteArrayOf() else cachedBuf
-        cachedBuf = cachedBuf!! + data
-        when (val message = BLEPacketHelper.parseFullMessagePayload(cachedBuf!!)) {
-            is ParseResult.Full -> {
-                cachedBuf = null
-                return true
-            }
-
-            is ParseResult.Partial -> {
-                return false
-            }
-
-            is ParseResult.Error -> throw message.error
-        }
+        return true
     }
 
 
@@ -85,7 +72,6 @@ class BLETransport(
         withContext(Dispatchers.IO) {
             for (packet in packets) {
                 withTimeout(50) {
-                    Log.d("AC_Simulator", "Sending message: ${ActiveCardEvent.fromValue(messageType)} - size: ${packet.size}")
                     val result =
                         bleClient.writeCharacteristicWithoutResponse(deviceId, TX_UUID, 0, packet)
                             .catch { e ->

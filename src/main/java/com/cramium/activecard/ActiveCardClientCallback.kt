@@ -4,6 +4,7 @@ import android.util.Log
 import com.cramium.activecard.transport.BLEPacketHelper
 import com.cramium.activecard.transport.ProtoBufHelper
 import com.cramium.sdk.client.LocalPartyCallback
+import com.cramium.sdk.model.mpc.SigningRequest
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 
@@ -74,6 +75,17 @@ class ActiveCardClientCallback: LocalPartyCallback {
             BLEPacketHelper.buildTransportMessageWrapper(
                 ActiveCardEvent.KG_ROUND_BROADCAST.id,
                 exchangeMessage.toByteArray()
+            )
+        )
+    }
+
+    override fun initLocalPartySigningProcess(signingRequest: SigningRequest) {
+        Log.d("ActiveCardClientCallback", "initLocalPartySigningProcess")
+        val request = ProtoBufHelper.buildSigningRequest(signingRequest)
+        _sendMessage.tryEmit(
+            BLEPacketHelper.buildTransportMessageWrapper(
+                ActiveCardEvent.KG_INIT_SIGNING_PROCESS.id,
+                request.toByteArray()
             )
         )
     }

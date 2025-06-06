@@ -22,6 +22,9 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import com.cramium.activecard.SigningRequest as SigningRequestProto
+import com.cramium.sdk.model.mpc.SigningRequest
+import com.cramium.sdk.model.mpc.TxSigning
 
 /**
  * An interface representing the server side of an active card transport layer.
@@ -63,10 +66,11 @@ interface ActiveCardServer {
         acPublicKey: ByteArray,
         acPrivateKey: ByteArray,
         saveMobilePublicKey: (ByteArray) -> Unit,
+        onLog: (String) -> Unit,
         onDone: () -> Unit = {}
     ): Flow<Unit>
 
-    fun keygen(): Job
+    fun activeCardFlow(onLog: (String) -> Unit): Job
 }
 
 
@@ -93,6 +97,7 @@ class ActiveCardServerImpl(
         acPublicKey: ByteArray,
         acPrivateKey: ByteArray,
         saveMobilePublicKey: (ByteArray) -> Unit,
+        onLog: (String) -> Unit,
         onDone: () -> Unit
     ): Flow<Unit> {
         var mobilePriKey = byteArrayOf()
@@ -102,8 +107,10 @@ class ActiveCardServerImpl(
                 when (ActiveCardEvent.fromValue(result.messageType)) {
                     ActiveCardEvent.CHALLENGE -> {
                         val nonce = NonceRequest.parseFrom(result.contents)
-                        Log.d("AC_Simulator", "Receive challenge event $nonce")
+                        onLog("Receive challenge event")
+                        Log.d("AC_Simulator", "Receive challenge event")
                         val signedNonce = ProtoBufHelper.buildSignedNonce(nonce.nonce.toByteArray(), acPrivateKey)
+                        onLog("Send signed nonce event")
                         Log.d("AC_Simulator", "Send signed nonce event $signedNonce")
                         sendMessage(ActiveCardEvent.SIGNED_NONCE.id, signedNonce.toByteArray())
                     }
@@ -111,6 +118,7 @@ class ActiveCardServerImpl(
                     ActiveCardEvent.SIGNATURE_VERIFICATION_RESULT -> {
                         val verificationResult = SignatureVerificationResult.parseFrom(result.contents.toByteArray())
                         Log.d("AC_Simulator", "Receive verification result event $verificationResult")
+                        onLog("Receive verification result event")
                         if (!verificationResult.valid) throw ActiveCardException("cra-mks-008-01", "Signature verification failed")
                     }
 
@@ -119,6 +127,7 @@ class ActiveCardServerImpl(
                         mobilePriKey = pubKeyMessage.pubkey.toByteArray()
                         saveMobilePublicKey(pubKeyMessage.pubkey.toByteArray())
                         val nonce = ProtoBufHelper.buildNonceRequest(nonceBytes)
+                        onLog("Send challenge")
                         Log.d("AC_Simulator", "Send challenge $nonce")
                         sendMessage(ActiveCardEvent.CHALLENGE.id, nonce.toByteArray())
                     }
@@ -126,8 +135,10 @@ class ActiveCardServerImpl(
                     ActiveCardEvent.SIGNED_NONCE -> {
                         val signedNonce = SignedNonce.parseFrom(result.contents.toByteArray())
                         Log.d("AC_Simulator", "Receive signed nonce event $signedNonce")
+                        onLog("Receive signed nonce event")
                         val message = ProtoBufHelper.buildVerifySignedNonce(mobilePriKey, nonceBytes, signedNonce.signature.toByteArray())
                         if (message.valid) {
+                            onLog("Send signature verification result event")
                             Log.d("AC_Simulator", "Send signature verification result event $message")
                             sendMessage(ActiveCardEvent.SIGNATURE_VERIFICATION_RESULT.id, message.toByteArray())
                             onDone()
@@ -190,11 +201,14 @@ class ActiveCardServerImpl(
 
     private var keygenJob: Job? = null
     private var paillierJob: Job? = null
-    override fun keygen(): Job {
+    private var signingJob: Job? = null
+    private var isFirstSendMessage = false
+    override fun activeCardFlow(onLog: (String) -> Unit): Job {
         return scope.launch {
             callback.sendMessage
                 .onEach {
                     Log.d("AC_Simulator", "Send message: $it")
+                    onLog("Send event ${ActiveCardEvent.fromValue(it.messageType)}")
                     sendMessage(it)
                 }
                 .launchIn(this@launch)
@@ -205,39 +219,72 @@ class ActiveCardServerImpl(
                         ActiveCardEvent.KG_INIT_MNEMONIC_KEYGEN_PROCESS -> {
                             keygenJob?.cancel()
                             keygenJob = null
+                            isFirstSendMessage = true
                             val mnemonicKeygenProcess = InitiateMnemonicKeyGen.parseFrom(result.contents)
+                            onLog("Receive KG_INIT_MNEMONIC_KEYGEN_PROCESS event")
                             Log.d("AC_Simulator", "Receive KG_INIT_MNEMONIC_KEYGEN_PROCESS event $mnemonicKeygenProcess")
                             keygenJob = mpcClient.localPartyMnemonicKeyGen(mnemonicKeygenProcess.groupId, mnemonicKeygenProcess.secretNumber)
+                            onLog("Register Keygen successfully")
                         }
                         ActiveCardEvent.KG_INIT_MNEMONIC_PAILLIER_PROCESS -> {
                             paillierJob?.cancel()
                             paillierJob = null
+                            isFirstSendMessage = true
                             val paillierProcess = InitiatePaillierKeyGen.parseFrom(result.contents)
+                            onLog("Receive KG_INIT_MNEMONIC_PAILLIER_PROCESS event")
                             Log.d("AC_Simulator", "Receive KG_INIT_MNEMONIC_PAILLIER_PROCESS event $paillierProcess")
-                            paillierJob = mpcClient.localPartyPaillier(paillierProcess.groupId) {
-                                paillierJob = null
-                            }
+                            paillierJob = mpcClient.localPartyPaillier(paillierProcess.groupId)
                             Log.d("AC_Simulator", "End Receive KG_INIT_MNEMONIC_PAILLIER_PROCESS event $paillierProcess")
+                            onLog("Register paillier successfully")
+                        }
+                        ActiveCardEvent.KG_INIT_SIGNING_PROCESS -> {
+                            signingJob?.cancel()
+                            signingJob = null
+                            isFirstSendMessage = true
+                            val proto = SigningRequestProto.parseFrom(result.contents)
+                            onLog("Receive KG_INIT_MNEMONIC_KEYGEN_PROCESS event")
+                            Log.d("AC_Simulator", "Receive KG_INIT_MNEMONIC_KEYGEN_PROCESS event $proto")
+                            val signingRequest = SigningRequest(
+                                ellipticCurveType = proto.ellipticCurveType,
+                                paillierGroupId = proto.paillierGroupId,
+                                keyGenGroupId = proto.keyGenGroupId,
+                                keyIdentity = proto.keyIdentity,
+                                derivationPath = proto.derivationPath,
+                                msg = proto.msg.toByteArray(),
+                                txSigning = TxSigning(
+                                    chainId = proto.txSigning.chainId,
+                                    payload = proto.txSigning.payload.toByteArray()
+                                )
+                            )
+                            signingJob = mpcClient.localPartySigning(signingRequest)
+                            onLog("Signing successfully")
                         }
                         ActiveCardEvent.KG_STORE_EXTERNAL_PARTY_IDENTITY_PUBKEY -> {
                             val groupData = GroupData.parseFrom(result.contents)
                             mpcClient.localPartySaveExternalPartyIdentityPublicKey(groupData.groupId, groupData.data.toByteArray())
+                            onLog("Receive KG_STORE_EXTERNAL_PARTY_IDENTITY_PUBKEY event")
                             Log.d("AC_Simulator", "Receive KG_STORE_EXTERNAL_PARTY_IDENTITY_PUBKEY event $groupData")
                         }
                         ActiveCardEvent.KG_STORE_GROUP_PARTY_DATA -> {
                             val groupData = GroupData.parseFrom(result.contents)
                             mpcClient.preparePartyGroupData(groupData.groupId, groupData.data.toByteArray())
+                            onLog("Receive KG_STORE_GROUP_PARTY_DATA event")
                             Log.d("AC_Simulator", "Receive KG_STORE_GROUP_PARTY_DATA event $groupData")
                         }
                         ActiveCardEvent.KG_STORE_PARTY_IDENTITY_PRIVATE_KEY -> {
                             val groupData = GroupData.parseFrom(result.contents)
                             mpcClient.saveInternalIdentityPrivateKey(groupData.groupId, groupData.data.toByteArray())
+                            onLog("Receive KG_STORE_PARTY_IDENTITY_PRIVATE_KEY event")
                             Log.d("AC_Simulator", "Receive KG_STORE_PARTY_IDENTITY_PRIVATE_KEY event $groupData")
                         }
                         ActiveCardEvent.KG_ROUND_BROADCAST -> {
-                            if (paillierJob == null) delay(100)
+                            if (isFirstSendMessage) {
+                                delay(500)
+                                isFirstSendMessage = false
+                            }
                             val exchangeMessage = BroadcastExchangeMessage.parseFrom(result.contents)
                             mpcClient.inputPartyInMsg(exchangeMessage.groupId, exchangeMessage.msg.toByteArray())
+                            onLog("Receive KG_SEND_EXCHANGE_MESSAGE event")
                             Log.d("AC_Simulator", "Receive KG_SEND_EXCHANGE_MESSAGE event $exchangeMessage")
                         }
                         else -> {}

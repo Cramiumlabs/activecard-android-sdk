@@ -94,6 +94,7 @@ interface ActiveCardClient {
         acPublicKey: ByteArray,
         mobilePubKey: ByteArray,
         mobilePrivateKey: ByteArray,
+        onLog: (String) -> Unit,
         onDone: () -> Unit
     ): Job
 
@@ -114,7 +115,7 @@ interface ActiveCardClient {
      */
     fun subscribeToTx(deviceId: String): Flow<ByteArray>
 
-    fun keygen(deviceId: String): Job
+    fun activeCardFlow(deviceId: String, onLog: (String) -> Unit): Job
 }
 
 /**
@@ -153,13 +154,9 @@ class ActiveCardClientImpl(
             .launchIn(scope)
     }
     private val bleTransport: BLETransport = BLETransport(bleClient)
-    override val receiveMessage: SharedFlow<TransportMessageWrapper>
-        get() = bleTransport.receiveMessage
-    override val connectionUpdate: SharedFlow<ConnectionUpdate>
-        get() = bleClient.connectionUpdateSubject
-
-    private var sendJob: Job? = null
-    private var keygenJob: Job? = null
+    override val receiveMessage: SharedFlow<TransportMessageWrapper> = bleTransport.receiveMessage
+    override val connectionUpdate: SharedFlow<ConnectionUpdate> = bleClient.connectionUpdateSubject
+    private var authenticateJob: Job? = null
 
     override fun connectToDevice(deviceId: String) {
         bleClient.connectToDevice(deviceId)
@@ -196,23 +193,27 @@ class ActiveCardClientImpl(
         acPublicKey: ByteArray,
         mobilePubKey: ByteArray,
         mobilePrivateKey: ByteArray,
+        onLog: (String) -> Unit,
         onDone: () -> Unit
     ): Job {
         val nonceBytes = generateNonce()
-        return scope.launch {
+        return CoroutineScope(Dispatchers.IO).launch {
             delay(2000)
-            receiveMessage
+            authenticateJob = receiveMessage
                 .onEach { result ->
                     when (ActiveCardEvent.fromValue(result.messageType)) {
                         ActiveCardEvent.SIGNED_NONCE -> {
                             val signedNonce = SignedNonce.parseFrom(result.contents.toByteArray())
+                            onLog("Receive signed nonce event")
                             Log.d("AC_Simulator", "Receive signed nonce event $signedNonce")
                             val message = ProtoBufHelper.buildVerifySignedNonce(acPublicKey, nonceBytes, signedNonce.signature.toByteArray())
                             if (message.valid) {
+                                onLog("Send signature verification result event")
                                 Log.d("AC_Simulator", "Send signature verification result event $message")
                                 sendMessage(deviceId, ActiveCardEvent.SIGNATURE_VERIFICATION_RESULT.id, message.toByteArray())
                                 val pubKeyMessage = ProtoBufHelper.buildIdentityPublicKey(mobilePubKey, "mobile")
-                                Log.d("AC_Simulator", "Send mobile public key event $pubKeyMessage")
+                                onLog("Send mobile public key event")
+                                Log.d("AC_Simulator", "Send mobile public key event")
                                 sendMessage(deviceId, ActiveCardEvent.SEND_IDENTITY_PUBLIC_KEY.id, pubKeyMessage.toByteArray())
                             }
                             else throw ActiveCardException("cra-aks-008-00", "Signature verification failed")
@@ -220,15 +221,18 @@ class ActiveCardClientImpl(
 
                         ActiveCardEvent.CHALLENGE -> {
                             val nonce = NonceRequest.parseFrom(result.contents)
-                            Log.d("AC_Simulator", "Receive challenge event $nonce")
+                            onLog("Receive challenge event")
+                            Log.d("AC_Simulator", "Receive challenge event")
                             val signedNonce = ProtoBufHelper.buildSignedNonce(nonce.nonce.toByteArray(), mobilePrivateKey)
-                            Log.d("AC_Simulator", "Send signed nonce event $signedNonce")
+                            onLog("Send signed nonce event")
+                            Log.d("AC_Simulator", "Send signed nonce event")
                             sendMessage(deviceId, ActiveCardEvent.SIGNED_NONCE.id, signedNonce.toByteArray())
                         }
 
                         ActiveCardEvent.SIGNATURE_VERIFICATION_RESULT -> {
                             val verificationResult = SignatureVerificationResult.parseFrom(result.contents.toByteArray())
-                            Log.d("AC_Simulator", "Receive verification result event $verificationResult")
+                            onLog("Receive verification result event")
+                            Log.d("AC_Simulator", "Receive verification result event")
                             if (!verificationResult.valid) throw ActiveCardException("cra-mks-008-01", "Signature verification failed")
                             onDone()
                         }
@@ -238,6 +242,7 @@ class ActiveCardClientImpl(
                 }
                 .launchIn(this)
             val nonce = ProtoBufHelper.buildNonceRequest(nonceBytes)
+            onLog("Send challenge")
             Log.d("AC_Simulator", "Send challenge $nonce")
             sendMessage(deviceId, ActiveCardEvent.CHALLENGE.id, nonce.toByteArray())
         }
@@ -300,11 +305,14 @@ class ActiveCardClientImpl(
         }
     }
 
-    override fun keygen(deviceId: String): Job {
+    override fun activeCardFlow(deviceId: String, onLog: (String) -> Unit): Job {
+        authenticateJob?.cancel()
+        authenticateJob = null
         return scope.launch {
             callback.sendMessage
                 .onEach {
                     Log.d("AC_Simulator", "Send message $deviceId - $it")
+                    onLog("Send event ${ActiveCardEvent.fromValue(it.messageType)} to $deviceId")
                     delay(50)
                     bleTransport.writeData(deviceId, it)
                 }
@@ -320,6 +328,7 @@ class ActiveCardClientImpl(
 
                         ActiveCardEvent.KG_ROUND_BROADCAST -> {
                             val exchangeMessage = BroadcastExchangeMessage.parseFrom(result.contents)
+                            onLog("Receive KG_ROUND_BROADCAST")
                             mpcClient.inputPartyInMsg(exchangeMessage.groupId, exchangeMessage.msg.toByteArray())
                         }
                         // TODO: Don't care

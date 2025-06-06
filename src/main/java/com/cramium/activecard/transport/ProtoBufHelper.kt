@@ -10,8 +10,12 @@ import com.cramium.activecard.NonceRequest
 import com.cramium.activecard.PairingConfirmation
 import com.cramium.activecard.SignatureVerificationResult
 import com.cramium.activecard.SignedNonce
+import com.cramium.activecard.SigningRequest as SigningRequestProto
+import com.cramium.activecard.TxSigning as TxSigningProto
 import com.cramium.activecard.UserIdentity
 import com.cramium.activecard.utils.Ed25519Signer
+import com.cramium.sdk.model.mpc.SigningRequest
+import com.cramium.sdk.model.mpc.TxSigning
 import com.google.protobuf.ByteString
 
 object ProtoBufHelper {
@@ -96,6 +100,22 @@ object ProtoBufHelper {
         return BroadcastExchangeMessage.newBuilder()
             .setGroupId(groupId)
             .setMsg(ByteString.copyFrom(msg))
+            .build()
+    }
+
+    fun buildSigningRequest(request: SigningRequest): SigningRequestProto {
+        val txSigning = TxSigningProto.newBuilder()
+            .setChainId(request.txSigning.chainId)
+            .setPayload(ByteString.copyFrom(request.txSigning.payload))
+            .build()
+        return SigningRequestProto.newBuilder()
+            .setEllipticCurveType(request.ellipticCurveType)
+            .setPaillierGroupId(request.paillierGroupId)
+            .setKeyGenGroupId(request.keyGenGroupId)
+            .setKeyIdentity(request.keyIdentity)
+            .setDerivationPath(request.derivationPath)
+            .setMsg(ByteString.copyFrom(request.msg))
+            .setTxSigning(txSigning)
             .build()
     }
 }

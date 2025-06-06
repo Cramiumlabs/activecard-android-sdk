@@ -21,7 +21,10 @@ enum class ActiveCardEvent(val id: Int) {
     KG_ROUND_BROADCAST(1006),                      // Broadcast exchange message to party
     // Error + control
     KG_ERROR(1007),                                // Error report within Key‑Gen session
-    KG_ABORT(1008)                                 // Abort entire Key‑Gen session
+    KG_ABORT(1008),                                // Abort entire Key‑Gen session
+
+    // Signing
+    KG_INIT_SIGNING_PROCESS(1100)
     ;
 
     companion object {

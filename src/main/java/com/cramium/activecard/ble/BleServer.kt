@@ -135,7 +135,7 @@ class BleServerImpl(
     override fun notifyClients(data: ByteArray) {
         val service = gattServer?.getService(BLETransport.UART_UUID) ?: return
         val char = service.getCharacteristic(BLETransport.RX_UUID) ?: return
-        Log.d("AC_Simulator", "Send data to client - data size: ${data.size}")
+//        Log.d("AC_Simulator", "Send data to client - data size: ${data.size}")
         clients.forEach { device ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 gattServer?.notifyCharacteristicChanged(device, char, false, data)
@@ -200,7 +200,7 @@ class BleServerImpl(
             offset: Int,
             value: ByteArray
         ) {
-            Log.d("AC_Simulator", "On write request: ${characteristic.uuid} - value: ${value.size}")
+//            Log.d("AC_Simulator", "On write request: ${characteristic.uuid} - value: ${value.size}")
             blePacketHelper.emit(value.copyOfRange(5, value.size))
             if (characteristic.uuid == BLETransport.TX_UUID) {
                 if (responseNeeded) {
@@ -235,7 +235,7 @@ class BleServerImpl(
         }
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
-            Log.d(TAG, "Notification sent to ${device.address}, status=$status")
+//            Log.d(TAG, "Notification sent to ${device.address}, status=$status")
         }
     }
 }

@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package com.cramium.sdk;
+option java_multiple_files = true;
+option java_package = "com.cramium.activecard";
+
+// Message definition for TxSigning
+message TxSigning {
+  string chain_id = 1;
+  bytes payload = 2;
+}
+
+// Message definition for SigningRequest
+message SigningRequest {
+  string elliptic_curve_type = 1;
+  string paillier_group_id = 2;
+  string key_gen_group_id = 3;
+  string key_identity = 4;
+  string derivation_path = 5;
+  bytes msg = 6;
+  TxSigning tx_signing = 7; // Nested message
+}
