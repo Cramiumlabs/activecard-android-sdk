@@ -18,5 +18,6 @@ message SigningRequest {
   string key_identity = 4;
   string derivation_path = 5;
   bytes msg = 6;
-  TxSigning tx_signing = 7; // Nested message
+  TxSigning tx_signing = 7;
+  string partyIds = 8;
 }

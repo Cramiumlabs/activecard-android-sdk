@@ -116,6 +116,7 @@ object ProtoBufHelper {
             .setDerivationPath(request.derivationPath)
             .setMsg(ByteString.copyFrom(request.msg))
             .setTxSigning(txSigning)
+            .setPartyIds(request.partyIds)
             .build()
     }
 }

@@ -254,7 +254,8 @@ class ActiveCardServerImpl(
                                 txSigning = TxSigning(
                                     chainId = proto.txSigning.chainId,
                                     payload = proto.txSigning.payload.toByteArray()
-                                )
+                                ),
+                                partyIds = proto.partyIds
                             )
                             signingJob = mpcClient.localPartySigning(signingRequest)
                             onLog("Signing successfully")
@@ -279,7 +280,7 @@ class ActiveCardServerImpl(
                         }
                         ActiveCardEvent.KG_ROUND_BROADCAST -> {
                             if (isFirstSendMessage) {
-                                delay(500)
+                                delay(1000)
                                 isFirstSendMessage = false
                             }
                             val exchangeMessage = BroadcastExchangeMessage.parseFrom(result.contents)
